@@ -11,10 +11,9 @@ func NewSuite[G, W, T, D any](
 	data func() D,
 ) Suite[G, W, T, D] {
 	return func(t *testing.T) (G, W, T) {
-		ctx := &Ctx[D]{
-			T:    t,
-			Data: data(),
-		}
-		return given(ctx), when(ctx), then(ctx)
+		d := data()
+		return given(&Ctx[D]{T: t, Data: d, prefix: "Given"}),
+			when(&Ctx[D]{T: t, Data: d, prefix: "When"}),
+			then(&Ctx[D]{T: t, Data: d, prefix: "Then"})
 	}
 }
