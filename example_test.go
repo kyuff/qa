@@ -28,8 +28,7 @@ func TestMain(m *testing.M) {
 // --- Test data ---
 
 type orderData struct {
-	OrderID     string
-	PaymentStub *qa.HTTPStub
+	OrderID string
 }
 
 var orderSuite = qa.NewSuite(
@@ -38,8 +37,7 @@ var orderSuite = qa.NewSuite(
 	func(ctx *qa.Ctx[*orderData]) *orderThen { return &orderThen{ctx} },
 	func(t *testing.T) *orderData {
 		return &orderData{
-			OrderID:     fmt.Sprintf("order-%s", t.Name()),
-			PaymentStub: paymentStub,
+			OrderID: fmt.Sprintf("order-%s", t.Name()),
 		}
 	},
 )
@@ -50,7 +48,7 @@ type orderGiven struct{ ctx *qa.Ctx[*orderData] }
 
 func (g *orderGiven) PaymentServiceAcceptsCharge() *orderGiven {
 	g.ctx.Run("payment service accepts charge", func(t *testing.T) {
-		g.ctx.Data.PaymentStub.
+		paymentStub.
 			On("POST", "/charge").
 			WithBody(qa.Contains(g.ctx.Data.OrderID)).
 			Return(200, `{"ok":true}`)
@@ -75,7 +73,7 @@ type orderThen struct{ ctx *qa.Ctx[*orderData] }
 
 func (th *orderThen) PaymentWasCharged() *orderThen {
 	th.ctx.Run("payment was charged", func(t *testing.T) {
-		calls := th.ctx.Data.PaymentStub.
+		calls := paymentStub.
 			Calls("POST", "/charge").
 			WithBody(qa.Contains(th.ctx.Data.OrderID))
 		if len(calls) == 0 {
