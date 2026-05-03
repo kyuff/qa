@@ -1,4 +1,4 @@
-package stubs
+package httpstub
 
 // RecordedCall holds the details of a single request the stub received.
 type RecordedCall struct {

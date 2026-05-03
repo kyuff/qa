@@ -1,4 +1,4 @@
-package stubs_test
+package httpstub_test
 
 import (
 	"context"
@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kyuff/qa/stubs"
+	"github.com/kyuff/qa/httpstub"
 )
 
-func startedHTTP(t *testing.T) *stubs.HTTP {
+func startedHTTP(t *testing.T) *httpstub.HTTP {
 	t.Helper()
-	s := stubs.NewHTTP(t.Name())
+	s := httpstub.New(t.Name())
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("startedHTTP: %v", err)
 	}

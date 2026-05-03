@@ -1,4 +1,4 @@
-package stubs
+package httpstub
 
 import (
 	"bytes"
@@ -51,9 +51,9 @@ type HTTP struct {
 	doneOnce sync.Once
 }
 
-// NewHTTP creates an HTTP stub. Call Start to bring it up, or register it with
+// New creates an HTTP stub. Call Start to bring it up, or register it with
 // qa.WithStub which calls Start automatically in local and stubs-only modes.
-func NewHTTP(name string, opts ...Option) *HTTP {
+func New(name string, opts ...Option) *HTTP {
 	cfg := applyOptions(defaultConfig(), opts...)
 	s := &HTTP{
 		name: name,

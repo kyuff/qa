@@ -1,4 +1,4 @@
-package stubs
+package httpstub
 
 // Option configures an HTTP stub.
 type Option func(*config)

@@ -1,4 +1,4 @@
-package stubs_test
+package httpstub_test
 
 import (
 	"context"
@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kyuff/qa/stubs"
+	"github.com/kyuff/qa/httpstub"
 )
 
 func TestHTTP(t *testing.T) {
-	t.Run("NewHTTP", func(t *testing.T) {
+	t.Run("New", func(t *testing.T) {
 		t.Run("should set URL immediately when addr has fixed port", func(t *testing.T) {
 			// arrange
 			var (
@@ -18,7 +18,7 @@ func TestHTTP(t *testing.T) {
 			)
 
 			// act
-			sut := stubs.NewHTTP(t.Name(), stubs.WithAddr(addr))
+			sut := httpstub.New(t.Name(), httpstub.WithAddr(addr))
 
 			// assert
 			if sut.URL != "http://"+addr {
@@ -28,7 +28,7 @@ func TestHTTP(t *testing.T) {
 
 		t.Run("should leave URL empty when using random port", func(t *testing.T) {
 			// act
-			sut := stubs.NewHTTP(t.Name())
+			sut := httpstub.New(t.Name())
 
 			// assert
 			if sut.URL != "" {
@@ -41,7 +41,7 @@ func TestHTTP(t *testing.T) {
 		t.Run("should populate URL after starting with random port", func(t *testing.T) {
 			// arrange
 			var (
-				sut = stubs.NewHTTP(t.Name())
+				sut = httpstub.New(t.Name())
 			)
 			t.Cleanup(func() { sut.Stop(context.Background()) })
 
@@ -60,14 +60,14 @@ func TestHTTP(t *testing.T) {
 		t.Run("should fail when port is already in use", func(t *testing.T) {
 			// arrange
 			var (
-				first = stubs.NewHTTP("first", stubs.WithAddr("localhost:19098"))
+				first = httpstub.New("first", httpstub.WithAddr("localhost:19098"))
 			)
 			if err := first.Start(context.Background()); err != nil {
 				t.Fatalf("arrange: %v", err)
 			}
 			t.Cleanup(func() { first.Stop(context.Background()) })
 
-			sut := stubs.NewHTTP("second", stubs.WithAddr("localhost:19098"))
+			sut := httpstub.New("second", httpstub.WithAddr("localhost:19098"))
 
 			// act
 			err := sut.Start(context.Background())
@@ -144,7 +144,7 @@ func TestHTTP(t *testing.T) {
 				sut     = startedHTTP(t)
 				orderID = t.Name()
 			)
-			sut.On("POST", "/charge").WithBody(stubs.Contains(orderID)).Return(http.StatusOK, `{}`)
+			sut.On("POST", "/charge").WithBody(httpstub.Contains(orderID)).Return(http.StatusOK, `{}`)
 
 			// act
 			got := post(t, sut.URL+"/charge", `{"id":"`+orderID+`"}`)
@@ -160,7 +160,7 @@ func TestHTTP(t *testing.T) {
 			var (
 				sut = startedHTTP(t)
 			)
-			sut.On("POST", "/charge").WithBody(stubs.Contains("order-A")).Return(http.StatusOK, `{}`)
+			sut.On("POST", "/charge").WithBody(httpstub.Contains("order-A")).Return(http.StatusOK, `{}`)
 
 			// act
 			got := post(t, sut.URL+"/charge", `{"id":"order-B"}`)
@@ -234,7 +234,7 @@ func TestHTTP(t *testing.T) {
 			post(t, sut.URL+"/charge", `{"id":"other"}`)
 
 			// act
-			got := sut.Calls("POST", "/charge").WithBody(stubs.Contains(orderID))
+			got := sut.Calls("POST", "/charge").WithBody(httpstub.Contains(orderID))
 
 			// assert
 			if len(got) != 1 {
@@ -247,7 +247,7 @@ func TestHTTP(t *testing.T) {
 		t.Run("Wait should unblock after Stop is called", func(t *testing.T) {
 			// arrange
 			var (
-				sut  = stubs.NewHTTP(t.Name())
+				sut  = httpstub.New(t.Name())
 				done = make(chan struct{})
 			)
 			if err := sut.Start(context.Background()); err != nil {
@@ -299,7 +299,7 @@ func TestHTTP(t *testing.T) {
 		t.Run("ci-mode binary can shut down stubs-only stub over HTTP", func(t *testing.T) {
 			// arrange: "stubs-only" stub is just a running server
 			var (
-				server = stubs.NewHTTP(t.Name())
+				server = httpstub.New(t.Name())
 				done   = make(chan struct{})
 			)
 			if err := server.Start(context.Background()); err != nil {
@@ -312,7 +312,7 @@ func TestHTTP(t *testing.T) {
 			}()
 
 			// act: "ci" binary creates a client stub pointing at the same URL
-			client := stubs.NewHTTP(t.Name(), stubs.WithAddr(server.URL[7:])) // strip "http://"
+			client := httpstub.New(t.Name(), httpstub.WithAddr(server.URL[7:])) // strip "http://"
 			client.Stop(context.Background())
 
 			// assert: the server-side Wait unblocked

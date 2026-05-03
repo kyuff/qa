@@ -1,4 +1,4 @@
-package stubs
+package httpstub
 
 // Response is a fluent builder for configuring an HTTP stub response.
 // Rules are sent to the stub server over HTTP so they work identically
