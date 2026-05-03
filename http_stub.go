@@ -118,8 +118,8 @@ func (s *HTTPStub) Wait(ctx context.Context) {
 }
 
 // On begins configuring a response for a given method and path.
-func (s *HTTPStub) On(method, path string) *StubResponse {
-	return &StubResponse{stub: s, method: method, path: path}
+func (s *HTTPStub) On(method, path string) *HTTPStubResponse {
+	return &HTTPStubResponse{stub: s, method: method, path: path}
 }
 
 // Calls returns all recorded requests matching the given method and path.
