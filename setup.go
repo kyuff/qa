@@ -1,5 +1,0 @@
-package qa
-
-func Start() {
-
-}
