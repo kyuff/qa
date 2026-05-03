@@ -1,68 +1,79 @@
 package qa
 
-import "testing"
+import (
+	"context"
+	"fmt"
+	"sync"
+	"testing"
+)
 
-// Runtime holds all external dependencies for a test suite.
-// Stubs are started when NewRuntime is called, so their addresses are
-// available immediately for configuring the application under test.
+// Runtime holds the stubs registered for a test suite.
+// Create it in TestMain with NewRuntime and call Run to execute the tests.
 type Runtime struct {
-	stubs []Stub
-	app   appController
+	cfg *Config
 }
 
-type Option func(*Runtime)
-
-// WithStub registers any Stub implementation with the runtime.
-// The stub is started during NewRuntime and stopped after all tests complete.
-func WithStub(s Stub) Option {
-	return func(rt *Runtime) {
-		rt.stubs = append(rt.stubs, s)
-		s.Start() // TODO: handle error
-	}
-}
-
-// WithApp configures the runtime to start the application locally.
-// Call this after NewRuntime so that stub addresses are already populated.
-// Omit on CI where docker-compose starts the application.
-func WithApp(cmd string, args ...string) Option {
-	return func(rt *Runtime) {
-		rt.app = &localApp{cmd: cmd, args: args}
-	}
-}
-
+// NewRuntime creates a Runtime and starts all registered stubs.
+// In ci mode stubs are not started (they are already running from a
+// prior stubs-only invocation at the same configured address).
 func NewRuntime(opts ...Option) *Runtime {
-	rt := &Runtime{}
-	for _, opt := range opts {
-		opt(rt)
+	cfg := applyOptions(defaultConfig(), opts...)
+	rt := &Runtime{cfg: cfg}
+	if currentRunMode() == runModeCI {
+		return rt
+	}
+	for _, s := range cfg.stubs {
+		if err := s.Start(context.Background()); err != nil {
+			panic(fmt.Sprintf("qa: failed to start stub: %v", err))
+		}
 	}
 	return rt
 }
 
-// Run starts the application (if local), executes all tests, then stops everything.
-// Call os.Exit(rt.Run(m)) from TestMain.
-func (rt *Runtime) Run(m *testing.M) int {
-	if rt.app != nil {
-		if err := rt.app.start(); err != nil {
-			panic("failed to start app: " + err.Error())
+// Run executes the test suite according to the current QA_MODE:
+//
+//   - local (default): starts the application, runs tests, stops stubs and app.
+//   - stubs-only: blocks until all stubs receive a shutdown signal from the
+//     ci-mode binary, then exits. Tests are not run.
+//   - ci: runs tests, then sends a shutdown signal to all stubs.
+//
+// Pass WithApp as an option here (not to NewRuntime) so stub URLs are already
+// populated when the application command is evaluated.
+func (rt *Runtime) Run(m *testing.M, opts ...Option) int {
+	runCfg := applyOptions(defaultConfig(), opts...)
+	ctx := context.Background()
+
+	switch currentRunMode() {
+	case runModeStubsOnly:
+		var wg sync.WaitGroup
+		for _, s := range rt.cfg.stubs {
+			wg.Add(1)
+			go func(s Stub) {
+				defer wg.Done()
+				s.Wait(ctx)
+			}(s)
 		}
-		defer rt.app.stop()
+		wg.Wait()
+		return 0
+
+	case runModeCI:
+		code := m.Run()
+		for _, s := range rt.cfg.stubs {
+			s.Stop(ctx)
+		}
+		return code
+
+	default: // local
+		if runCfg.app != nil {
+			if err := runCfg.app.start(ctx); err != nil {
+				panic(fmt.Sprintf("qa: failed to start app: %v", err))
+			}
+			defer runCfg.app.stop(ctx)
+		}
+		code := m.Run()
+		for _, s := range rt.cfg.stubs {
+			s.Stop(ctx)
+		}
+		return code
 	}
-	code := m.Run()
-	for _, s := range rt.stubs {
-		s.Stop()
-	}
-	return code
 }
-
-type appController interface {
-	start() error
-	stop()
-}
-
-type localApp struct {
-	cmd  string
-	args []string
-}
-
-func (a *localApp) start() error { return nil } // TODO: exec.Command, wait for health check
-func (a *localApp) stop()        {}              // TODO: signal, wait

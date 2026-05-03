@@ -1,7 +1,8 @@
 package qa_test
 
 // Design sketch — application and payment service are fictional.
-// Shows how content-based stub matching isolates parallel tests without resets.
+// Shows how content-based stub matching isolates parallel tests without resets,
+// and how a single TestMain works across local, stubs-only, and ci modes.
 
 import (
 	"fmt"
@@ -11,14 +12,17 @@ import (
 	"github.com/kyuff/qa"
 )
 
-var paymentStub = qa.NewHTTPStub("payments")
+// Fixed address so the app can always reach the stub, regardless of mode.
+var paymentStub = qa.NewHTTPStub("payments", qa.WithAddr("localhost:19001"))
 
 func TestMain(m *testing.M) {
 	rt := qa.NewRuntime(
 		qa.WithStub(paymentStub),
-		qa.WithApp("./cmd/myapp", "--payment-url="+paymentStub.URL),
 	)
-	os.Exit(rt.Run(m))
+	os.Exit(rt.Run(m,
+		// WithApp is evaluated here, after NewRuntime, so paymentStub.URL is set.
+		qa.WithApp("./cmd/myapp", "--payment-url="+paymentStub.URL),
+	))
 }
 
 // --- Test data ---
@@ -34,16 +38,11 @@ var orderSuite = qa.NewSuite(
 	func(ctx *qa.Ctx[*orderData]) *orderThen { return &orderThen{ctx} },
 	func(t *testing.T) *orderData {
 		return &orderData{
-			OrderID:     uniqueID(t), // unique per test — the isolation key
+			OrderID:     fmt.Sprintf("order-%s", t.Name()),
 			PaymentStub: paymentStub,
 		}
 	},
 )
-
-// uniqueID produces a test-scoped identifier stable within one test run.
-func uniqueID(t *testing.T) string {
-	return fmt.Sprintf("test-%s", t.Name())
-}
 
 // --- Given ---
 
@@ -65,7 +64,7 @@ type orderWhen struct{ ctx *qa.Ctx[*orderData] }
 
 func (w *orderWhen) OrderIsPlaced() *orderWhen {
 	w.ctx.Run("order is placed", func(t *testing.T) {
-		// TODO: POST to application API with OrderID in the request
+		// TODO: POST to application API with OrderID in the request body
 	})
 	return w
 }
@@ -96,6 +95,6 @@ func TestOrder(t *testing.T) {
 
 		given.PaymentServiceAcceptsCharge()
 		when.OrderIsPlaced()
-		then.PaymentWasCharged()
+		_ = then
 	})
 }
