@@ -10,17 +10,16 @@ import (
 	"testing"
 
 	"github.com/kyuff/qa"
+	"github.com/kyuff/qa/stubs"
 )
 
 // Fixed address so the app can always reach the stub, regardless of mode.
-var paymentStub = qa.NewHTTPStub("payments", qa.WithAddr("localhost:19001"))
+var paymentStub = stubs.NewHTTP("payments", stubs.WithAddr("localhost:19001"))
 
 func TestMain(m *testing.M) {
-	rt := qa.NewRuntime(
+	// paymentStub.URL is set at construction (WithAddr), so it is ready here.
+	os.Exit(qa.Run(m,
 		qa.WithStub(paymentStub),
-	)
-	os.Exit(rt.Run(m,
-		// WithApp is evaluated here, after NewRuntime, so paymentStub.URL is set.
 		qa.WithApp("./cmd/myapp", "--payment-url="+paymentStub.URL),
 	))
 }
@@ -50,7 +49,7 @@ func (g *orderGiven) PaymentServiceAcceptsCharge() *orderGiven {
 	g.ctx.Run("payment service accepts charge", func(t *testing.T) {
 		paymentStub.
 			On("POST", "/charge").
-			WithBody(qa.Contains(g.ctx.Data.OrderID)).
+			WithBody(stubs.Contains(g.ctx.Data.OrderID)).
 			Return(200, `{"ok":true}`)
 	})
 	return g
@@ -75,7 +74,7 @@ func (th *orderThen) PaymentWasCharged() *orderThen {
 	th.ctx.Run("payment was charged", func(t *testing.T) {
 		calls := paymentStub.
 			Calls("POST", "/charge").
-			WithBody(qa.Contains(th.ctx.Data.OrderID))
+			WithBody(stubs.Contains(th.ctx.Data.OrderID))
 		if len(calls) == 0 {
 			t.Errorf("expected payment service to be called with order %s", th.ctx.Data.OrderID)
 		}

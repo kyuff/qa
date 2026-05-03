@@ -1,4 +1,4 @@
-package qa
+package stubs
 
 import (
 	"bytes"
@@ -21,7 +21,6 @@ type httpRule struct {
 	body    string
 }
 
-// ruleRequest is the wire format for the management API.
 type ruleRequest struct {
 	Method       string `json:"method"`
 	Path         string `json:"path"`
@@ -30,21 +29,19 @@ type ruleRequest struct {
 	ResponseBody string `json:"response_body"`
 }
 
-// HTTPStub is a controllable HTTP server that records incoming requests
-// and returns configured responses. All management (rule registration,
-// call queries, shutdown) uses an HTTP protocol so the same code path
-// runs in every mode.
+// HTTP is a controllable HTTP server that records incoming requests and returns
+// configured responses. All management (rule registration, call queries, shutdown)
+// uses an HTTP protocol so the same code path runs in every mode.
 //
-// Use WithAddr to set a fixed host:port. Required for stubs-only and ci
-// modes where the application must reach the stub at a known address.
+// Use WithAddr to set a fixed host:port. Required for stubs-only and ci modes
+// where the application must reach the stub at a known address.
 // Omitting WithAddr assigns a random port, which is fine for local-only use.
-type HTTPStub struct {
-	// URL is the address the application should be configured to call.
-	// Set at construction when WithAddr provides a fixed port, or after
-	// Start returns when using a random port.
+type HTTP struct {
+	// URL is the base address the application should call.
+	// Set at construction when WithAddr is used, or after Start returns otherwise.
 	URL  string
 	name string
-	cfg  *StubConfig
+	cfg  *config
 
 	mu       sync.RWMutex
 	rules    []httpRule
@@ -54,11 +51,11 @@ type HTTPStub struct {
 	doneOnce sync.Once
 }
 
-// NewHTTPStub creates an HTTPStub. Call Start to bring it up, or register it
-// with NewRuntime which calls Start automatically in local and stubs-only modes.
-func NewHTTPStub(name string, opts ...StubOption) *HTTPStub {
-	cfg := applyStubOptions(defaultStubConfig(), opts...)
-	s := &HTTPStub{
+// NewHTTP creates an HTTP stub. Call Start to bring it up, or register it with
+// qa.WithStub which calls Start automatically in local and stubs-only modes.
+func NewHTTP(name string, opts ...Option) *HTTP {
+	cfg := applyOptions(defaultConfig(), opts...)
+	s := &HTTP{
 		name: name,
 		cfg:  cfg,
 		done: make(chan struct{}),
@@ -69,10 +66,12 @@ func NewHTTPStub(name string, opts ...StubOption) *HTTPStub {
 	return s
 }
 
-func (s *HTTPStub) Start(_ context.Context) error {
+// Start binds the port and starts the HTTP server in the background.
+// It returns once the server is ready to accept connections.
+func (s *HTTP) Start(_ context.Context) error {
 	ln, err := net.Listen("tcp", s.cfg.addr)
 	if err != nil {
-		return fmt.Errorf("httpstub %s: listen: %w", s.name, err)
+		return fmt.Errorf("stub %s: listen: %w", s.name, err)
 	}
 	if s.URL == "" {
 		s.URL = "http://" + ln.Addr().String()
@@ -87,10 +86,9 @@ func (s *HTTPStub) Start(_ context.Context) error {
 	return nil
 }
 
-// Stop sends a shutdown signal to the stub over HTTP and waits for it to
-// acknowledge. Safe to call from any mode: the stub shuts itself down on
-// receipt, which also unblocks any concurrent Wait call.
-func (s *HTTPStub) Stop(ctx context.Context) {
+// Stop sends a shutdown signal to the stub over HTTP.
+// Safe to call from any mode; also unblocks any concurrent Wait call.
+func (s *HTTP) Stop(ctx context.Context) {
 	if s.URL == "" {
 		return
 	}
@@ -102,28 +100,24 @@ func (s *HTTPStub) Stop(ctx context.Context) {
 	if err == nil {
 		resp.Body.Close()
 	}
-	// Mark done locally whether or not the request succeeded, so callers
-	// that follow Stop with Wait do not block indefinitely.
 	s.doneOnce.Do(func() { close(s.done) })
 }
 
-// Wait blocks until the stub receives a shutdown signal (via Stop or a direct
-// POST to /_qa/shutdown), or until ctx is cancelled. Used in stubs-only mode
-// to keep the process alive until the ci-mode binary calls Stop.
-func (s *HTTPStub) Wait(ctx context.Context) {
+// Wait blocks until the stub receives a shutdown signal or ctx is cancelled.
+func (s *HTTP) Wait(ctx context.Context) {
 	select {
 	case <-s.done:
 	case <-ctx.Done():
 	}
 }
 
-// On begins configuring a response for a given method and path.
-func (s *HTTPStub) On(method, path string) *HTTPStubResponse {
-	return &HTTPStubResponse{stub: s, method: method, path: path}
+// On begins configuring a response for the given method and path.
+func (s *HTTP) On(method, path string) *Response {
+	return &Response{stub: s, method: method, path: path}
 }
 
 // Calls returns all recorded requests matching the given method and path.
-func (s *HTTPStub) Calls(method, path string) RecordedCalls {
+func (s *HTTP) Calls(method, path string) RecordedCalls {
 	q := url.Values{}
 	q.Set("method", method)
 	q.Set("path", path)
@@ -137,7 +131,7 @@ func (s *HTTPStub) Calls(method, path string) RecordedCalls {
 	return out
 }
 
-func (s *HTTPStub) postRule(method, path string, matcher Matcher, status int, body string) {
+func (s *HTTP) postRule(method, path string, matcher Matcher, status int, body string) {
 	req := ruleRequest{
 		Method:       method,
 		Path:         path,
@@ -154,7 +148,7 @@ func (s *HTTPStub) postRule(method, path string, matcher Matcher, status int, bo
 	}
 }
 
-func (s *HTTPStub) handleApp(w http.ResponseWriter, r *http.Request) {
+func (s *HTTP) handleApp(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	headers := make(map[string]string, len(r.Header))
 	for k, v := range r.Header {
@@ -193,7 +187,7 @@ func (s *HTTPStub) handleApp(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, matched.body) //nolint:errcheck
 }
 
-func (s *HTTPStub) handleRules(w http.ResponseWriter, r *http.Request) {
+func (s *HTTP) handleRules(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -219,7 +213,7 @@ func (s *HTTPStub) handleRules(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-func (s *HTTPStub) handleCalls(w http.ResponseWriter, r *http.Request) {
+func (s *HTTP) handleCalls(w http.ResponseWriter, r *http.Request) {
 	method := r.URL.Query().Get("method")
 	path := r.URL.Query().Get("path")
 
@@ -236,7 +230,7 @@ func (s *HTTPStub) handleCalls(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out) //nolint:errcheck
 }
 
-func (s *HTTPStub) handleShutdown(w http.ResponseWriter, r *http.Request) {
+func (s *HTTP) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	s.doneOnce.Do(func() { close(s.done) })
 	go func() {

@@ -1,4 +1,4 @@
-package qa_test
+package stubs_test
 
 import (
 	"context"
@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kyuff/qa"
+	"github.com/kyuff/qa/stubs"
 )
 
-func TestHTTPStub(t *testing.T) {
-	t.Run("NewHTTPStub", func(t *testing.T) {
+func TestHTTP(t *testing.T) {
+	t.Run("NewHTTP", func(t *testing.T) {
 		t.Run("should set URL immediately when addr has fixed port", func(t *testing.T) {
 			// arrange
 			var (
@@ -18,7 +18,7 @@ func TestHTTPStub(t *testing.T) {
 			)
 
 			// act
-			sut := qa.NewHTTPStub(t.Name(), qa.WithAddr(addr))
+			sut := stubs.NewHTTP(t.Name(), stubs.WithAddr(addr))
 
 			// assert
 			if sut.URL != "http://"+addr {
@@ -28,7 +28,7 @@ func TestHTTPStub(t *testing.T) {
 
 		t.Run("should leave URL empty when using random port", func(t *testing.T) {
 			// act
-			sut := qa.NewHTTPStub(t.Name())
+			sut := stubs.NewHTTP(t.Name())
 
 			// assert
 			if sut.URL != "" {
@@ -41,7 +41,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should populate URL after starting with random port", func(t *testing.T) {
 			// arrange
 			var (
-				sut = qa.NewHTTPStub(t.Name())
+				sut = stubs.NewHTTP(t.Name())
 			)
 			t.Cleanup(func() { sut.Stop(context.Background()) })
 
@@ -60,14 +60,14 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should fail when port is already in use", func(t *testing.T) {
 			// arrange
 			var (
-				first = qa.NewHTTPStub("first", qa.WithAddr("localhost:19098"))
+				first = stubs.NewHTTP("first", stubs.WithAddr("localhost:19098"))
 			)
 			if err := first.Start(context.Background()); err != nil {
 				t.Fatalf("arrange: %v", err)
 			}
 			t.Cleanup(func() { first.Stop(context.Background()) })
 
-			sut := qa.NewHTTPStub("second", qa.WithAddr("localhost:19098"))
+			sut := stubs.NewHTTP("second", stubs.WithAddr("localhost:19098"))
 
 			// act
 			err := sut.Start(context.Background())
@@ -84,7 +84,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should return 404 when no rule matches", func(t *testing.T) {
 			// arrange
 			var (
-				sut = startedStub(t)
+				sut = startedHTTP(t)
 			)
 
 			// act
@@ -99,7 +99,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should return configured status and body", func(t *testing.T) {
 			// arrange
 			var (
-				sut        = startedStub(t)
+				sut        = startedHTTP(t)
 				wantStatus = http.StatusOK
 				wantBody   = `{"ok":true}`
 			)
@@ -121,7 +121,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should return 404 when method does not match", func(t *testing.T) {
 			// arrange
 			var (
-				sut = startedStub(t)
+				sut = startedHTTP(t)
 			)
 			sut.On("POST", "/charge").Return(http.StatusOK, `{}`)
 
@@ -141,10 +141,10 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should match when body satisfies WithBody matcher", func(t *testing.T) {
 			// arrange
 			var (
-				sut     = startedStub(t)
+				sut     = startedHTTP(t)
 				orderID = t.Name()
 			)
-			sut.On("POST", "/charge").WithBody(qa.Contains(orderID)).Return(http.StatusOK, `{}`)
+			sut.On("POST", "/charge").WithBody(stubs.Contains(orderID)).Return(http.StatusOK, `{}`)
 
 			// act
 			got := post(t, sut.URL+"/charge", `{"id":"`+orderID+`"}`)
@@ -158,9 +158,9 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should return 404 when body does not satisfy WithBody matcher", func(t *testing.T) {
 			// arrange
 			var (
-				sut = startedStub(t)
+				sut = startedHTTP(t)
 			)
-			sut.On("POST", "/charge").WithBody(qa.Contains("order-A")).Return(http.StatusOK, `{}`)
+			sut.On("POST", "/charge").WithBody(stubs.Contains("order-A")).Return(http.StatusOK, `{}`)
 
 			// act
 			got := post(t, sut.URL+"/charge", `{"id":"order-B"}`)
@@ -174,7 +174,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should match first rule when multiple rules match", func(t *testing.T) {
 			// arrange
 			var (
-				sut = startedStub(t)
+				sut = startedHTTP(t)
 			)
 			sut.On("POST", "/charge").Return(http.StatusOK, `{"first":true}`)
 			sut.On("POST", "/charge").Return(http.StatusAccepted, `{"second":true}`)
@@ -193,7 +193,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should record calls", func(t *testing.T) {
 			// arrange
 			var (
-				sut = startedStub(t)
+				sut = startedHTTP(t)
 			)
 			post(t, sut.URL+"/charge", `{}`)
 			post(t, sut.URL+"/charge", `{}`)
@@ -210,7 +210,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("should filter by method and path", func(t *testing.T) {
 			// arrange
 			var (
-				sut = startedStub(t)
+				sut = startedHTTP(t)
 			)
 			post(t, sut.URL+"/charge", `{}`)
 			http.Get(sut.URL + "/status") //nolint:errcheck
@@ -227,14 +227,14 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("WithBody should filter recorded calls by content", func(t *testing.T) {
 			// arrange
 			var (
-				sut     = startedStub(t)
+				sut     = startedHTTP(t)
 				orderID = t.Name()
 			)
 			post(t, sut.URL+"/charge", `{"id":"`+orderID+`"}`)
 			post(t, sut.URL+"/charge", `{"id":"other"}`)
 
 			// act
-			got := sut.Calls("POST", "/charge").WithBody(qa.Contains(orderID))
+			got := sut.Calls("POST", "/charge").WithBody(stubs.Contains(orderID))
 
 			// assert
 			if len(got) != 1 {
@@ -247,7 +247,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("Wait should unblock after Stop is called", func(t *testing.T) {
 			// arrange
 			var (
-				sut  = qa.NewHTTPStub(t.Name())
+				sut  = stubs.NewHTTP(t.Name())
 				done = make(chan struct{})
 			)
 			if err := sut.Start(context.Background()); err != nil {
@@ -273,7 +273,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("Wait should unblock when ctx is cancelled", func(t *testing.T) {
 			// arrange
 			var (
-				sut         = startedStub(t)
+				sut         = startedHTTP(t)
 				ctx, cancel = context.WithCancel(context.Background())
 				done        = make(chan struct{})
 			)
@@ -299,7 +299,7 @@ func TestHTTPStub(t *testing.T) {
 		t.Run("ci-mode binary can shut down stubs-only stub over HTTP", func(t *testing.T) {
 			// arrange: "stubs-only" stub is just a running server
 			var (
-				server = qa.NewHTTPStub(t.Name())
+				server = stubs.NewHTTP(t.Name())
 				done   = make(chan struct{})
 			)
 			if err := server.Start(context.Background()); err != nil {
@@ -312,7 +312,7 @@ func TestHTTPStub(t *testing.T) {
 			}()
 
 			// act: "ci" binary creates a client stub pointing at the same URL
-			client := qa.NewHTTPStub(t.Name(), qa.WithAddr(server.URL[7:])) // strip "http://"
+			client := stubs.NewHTTP(t.Name(), stubs.WithAddr(server.URL[7:])) // strip "http://"
 			client.Stop(context.Background())
 
 			// assert: the server-side Wait unblocked

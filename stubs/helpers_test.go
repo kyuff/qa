@@ -1,4 +1,4 @@
-package qa_test
+package stubs_test
 
 import (
 	"context"
@@ -6,21 +6,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kyuff/qa"
+	"github.com/kyuff/qa/stubs"
 )
 
-// startedStub starts a local HTTPStub on a random port and registers cleanup.
-func startedStub(t *testing.T) *qa.HTTPStub {
+func startedHTTP(t *testing.T) *stubs.HTTP {
 	t.Helper()
-	s := qa.NewHTTPStub(t.Name())
+	s := stubs.NewHTTP(t.Name())
 	if err := s.Start(context.Background()); err != nil {
-		t.Fatalf("startedStub: %v", err)
+		t.Fatalf("startedHTTP: %v", err)
 	}
 	t.Cleanup(func() { s.Stop(context.Background()) })
 	return s
 }
 
-// post sends a POST with body to url and returns the status code.
 func post(t *testing.T, url, body string) int {
 	t.Helper()
 	resp, err := http.Post(url, "application/json", strings.NewReader(body))

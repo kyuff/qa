@@ -7,56 +7,118 @@ import (
 	"github.com/kyuff/qa"
 )
 
-func TestRuntime(t *testing.T) {
-	t.Run("NewRuntime", func(t *testing.T) {
+type testingMMock struct{ code int }
+
+func (m *testingMMock) Run() int { return m.code }
+
+func TestRun(t *testing.T) {
+	t.Run("local mode", func(t *testing.T) {
 		t.Run("should start all registered stubs", func(t *testing.T) {
 			// arrange
 			var (
-				stub = qa.NewHTTPStub(t.Name())
+				stub = &StubMock{
+					StartFunc: func(ctx context.Context) error { return nil },
+					StopFunc:  func(ctx context.Context) {},
+				}
+				m = &testingMMock{}
 			)
-			t.Cleanup(func() { stub.Stop(context.Background()) })
 
 			// act
-			_ = qa.NewRuntime(qa.WithStub(stub))
+			qa.Run(m, qa.WithStub(stub))
 
 			// assert
-			if stub.URL == "" {
-				t.Error("expected stub URL to be set after NewRuntime")
+			if len(stub.StartCalls()) != 1 {
+				t.Errorf("got %d Start calls, want 1", len(stub.StartCalls()))
 			}
 		})
 
-		t.Run("should not start stubs in ci mode", func(t *testing.T) {
+		t.Run("should stop all registered stubs after tests", func(t *testing.T) {
+			// arrange
+			var (
+				stub = &StubMock{
+					StartFunc: func(ctx context.Context) error { return nil },
+					StopFunc:  func(ctx context.Context) {},
+				}
+				m = &testingMMock{}
+			)
+
+			// act
+			qa.Run(m, qa.WithStub(stub))
+
+			// assert
+			if len(stub.StopCalls()) != 1 {
+				t.Errorf("got %d Stop calls, want 1", len(stub.StopCalls()))
+			}
+		})
+	})
+
+	t.Run("ci mode", func(t *testing.T) {
+		t.Run("should not start stubs", func(t *testing.T) {
 			t.Setenv("QA_MODE", "ci")
 
 			// arrange
 			var (
-				stub = qa.NewHTTPStub(t.Name())
+				stub = &StubMock{
+					StopFunc: func(ctx context.Context) {},
+				}
+				m = &testingMMock{}
 			)
 
 			// act
-			_ = qa.NewRuntime(qa.WithStub(stub))
+			qa.Run(m, qa.WithStub(stub))
 
-			// assert: URL is still empty because Start was never called
-			if stub.URL != "" {
-				t.Errorf("expected URL to be empty in ci mode, got %q", stub.URL)
+			// assert
+			if len(stub.StartCalls()) != 0 {
+				t.Errorf("got %d Start calls, want 0", len(stub.StartCalls()))
 			}
 		})
 
-		t.Run("should set URL immediately for fixed-addr stub in ci mode", func(t *testing.T) {
+		t.Run("should stop stubs after tests", func(t *testing.T) {
 			t.Setenv("QA_MODE", "ci")
 
 			// arrange
 			var (
-				addr = "localhost:19097"
-				stub = qa.NewHTTPStub(t.Name(), qa.WithAddr(addr))
+				stub = &StubMock{
+					StopFunc: func(ctx context.Context) {},
+				}
+				m = &testingMMock{}
 			)
 
 			// act
-			_ = qa.NewRuntime(qa.WithStub(stub))
+			qa.Run(m, qa.WithStub(stub))
 
 			// assert
-			if stub.URL != "http://"+addr {
-				t.Errorf("got URL %q, want %q", stub.URL, "http://"+addr)
+			if len(stub.StopCalls()) != 1 {
+				t.Errorf("got %d Stop calls, want 1", len(stub.StopCalls()))
+			}
+		})
+	})
+
+	t.Run("stubs-only mode", func(t *testing.T) {
+		t.Run("should start stubs and wait for shutdown", func(t *testing.T) {
+			t.Setenv("QA_MODE", "stubs-only")
+
+			// arrange
+			var (
+				stub = &StubMock{
+					StartFunc: func(ctx context.Context) error { return nil },
+					WaitFunc:  func(ctx context.Context) {},
+				}
+				m = &testingMMock{}
+			)
+
+			// act
+			code := qa.Run(m, qa.WithStub(stub))
+
+			// assert
+			if len(stub.StartCalls()) != 1 {
+				t.Errorf("got %d Start calls, want 1", len(stub.StartCalls()))
+			}
+			if len(stub.WaitCalls()) != 1 {
+				t.Errorf("got %d Wait calls, want 1", len(stub.WaitCalls()))
+			}
+			if code != 0 {
+				t.Errorf("got exit code %d, want 0", code)
 			}
 		})
 	})
