@@ -32,16 +32,16 @@ func (th *testThen) ResultIsAccepted() *testThen {
 	return th
 }
 
-var newCase = qa.NewCase(
+var suite = qa.NewSuite(
 	func(ctx *qa.Ctx[testData]) *testGiven { return &testGiven{ctx} },
 	func(ctx *qa.Ctx[testData]) *testWhen { return &testWhen{ctx} },
 	func(ctx *qa.Ctx[testData]) *testThen { return &testThen{ctx} },
 	func() testData { return testData{} },
 )
 
-func TestCase(t *testing.T) {
+func TestSuite(t *testing.T) {
 	t.Run("shared ctx allows given to set data that then can read", func(t *testing.T) {
-		given, when, then := newCase(t)
+		given, when, then := suite(t)
 
 		given.SomethingExists()
 		when.ActionHappens()
