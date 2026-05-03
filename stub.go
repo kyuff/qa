@@ -1,25 +1,39 @@
 package qa
 
+// Stub is the lifecycle interface the Runtime needs from any stub server.
+// Implement this to integrate a custom protocol stub with the Runtime.
+type Stub interface {
+	Start() error
+	Stop()
+}
+
 // HTTPStub is a controllable HTTP server that records incoming requests
 // and returns configured responses. It is shared across all tests — isolation
 // is achieved by matching on request content (e.g. unique IDs in the body),
 // not by resetting state between tests.
 type HTTPStub struct {
 	// URL is where the application should be configured to call.
+	// Populated after Start() is called.
 	URL  string
 	name string
 	// TODO: management client or embedded server
 }
 
-// NewHTTPStub creates a stub that starts an in-process HTTP server.
 func NewHTTPStub(name string) *HTTPStub {
 	return &HTTPStub{name: name}
 }
 
-// ExternalHTTPStub connects to a stub server already running at the given URL.
-// Use this on CI where the stub is started by docker-compose.
 func ExternalHTTPStub(name, url string) *HTTPStub {
 	return &HTTPStub{name: name, URL: url}
+}
+
+func (s *HTTPStub) Start() error {
+	// TODO: start in-process HTTP server, set s.URL
+	return nil
+}
+
+func (s *HTTPStub) Stop() {
+	// TODO: stop server
 }
 
 // On begins configuring a response for a given method and path.
@@ -32,10 +46,6 @@ func (s *HTTPStub) Calls(method, path string) RecordedCalls {
 	return nil // TODO: query management API
 }
 
-func (s *HTTPStub) start() {
-	// TODO: start in-process HTTP server, set s.URL
-}
-
 // StubResponse is a fluent builder for configuring a stub response.
 type StubResponse struct {
 	stub    *HTTPStub
@@ -45,7 +55,6 @@ type StubResponse struct {
 }
 
 // WithBody narrows this response to requests whose body satisfies the matcher.
-// Use this to isolate parallel tests by matching on unique data (e.g. an order ID).
 func (r *StubResponse) WithBody(m Matcher) *StubResponse {
 	r.matcher = m
 	return r

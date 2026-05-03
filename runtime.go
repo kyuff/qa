@@ -3,25 +3,26 @@ package qa
 import "testing"
 
 // Runtime holds all external dependencies for a test suite.
-// Stubs are started when NewRuntime is called, so their URLs are
+// Stubs are started when NewRuntime is called, so their addresses are
 // available immediately for configuring the application under test.
 type Runtime struct {
-	stubs []*HTTPStub
+	stubs []Stub
 	app   appController
 }
 
 type Option func(*Runtime)
 
-// WithHTTPStub registers and starts an HTTP stub server with the runtime.
-func WithHTTPStub(stub *HTTPStub) Option {
+// WithStub registers any Stub implementation with the runtime.
+// The stub is started during NewRuntime and stopped after all tests complete.
+func WithStub(s Stub) Option {
 	return func(rt *Runtime) {
-		rt.stubs = append(rt.stubs, stub)
-		stub.start() // TODO: start in-process server, set stub.URL
+		rt.stubs = append(rt.stubs, s)
+		s.Start() // TODO: handle error
 	}
 }
 
 // WithApp configures the runtime to start the application locally.
-// Call this after NewRuntime so that stub URLs are already populated.
+// Call this after NewRuntime so that stub addresses are already populated.
 // Omit on CI where docker-compose starts the application.
 func WithApp(cmd string, args ...string) Option {
 	return func(rt *Runtime) {
@@ -46,7 +47,11 @@ func (rt *Runtime) Run(m *testing.M) int {
 		}
 		defer rt.app.stop()
 	}
-	return m.Run()
+	code := m.Run()
+	for _, s := range rt.stubs {
+		s.Stop()
+	}
+	return code
 }
 
 type appController interface {

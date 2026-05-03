@@ -15,7 +15,7 @@ var paymentStub = qa.NewHTTPStub("payments")
 
 func TestMain(m *testing.M) {
 	rt := qa.NewRuntime(
-		qa.WithHTTPStub(paymentStub),
+		qa.WithStub(paymentStub),
 		qa.WithApp("./cmd/myapp", "--payment-url="+paymentStub.URL),
 	)
 	os.Exit(rt.Run(m))
