@@ -1,11 +1,9 @@
 package qa
 
 // HTTPStub is a controllable HTTP server that records incoming requests
-// and returns configured responses. It can run in-process (local dev)
-// or connect to an external stub process (CI via docker-compose).
-//
-// Use NewHTTPStub for local development. Point URL at an existing
-// stub server for CI by using ExternalHTTPStub.
+// and returns configured responses. It is shared across all tests — isolation
+// is achieved by matching on request content (e.g. unique IDs in the body),
+// not by resetting state between tests.
 type HTTPStub struct {
 	// URL is where the application should be configured to call.
 	URL  string
@@ -24,22 +22,14 @@ func ExternalHTTPStub(name, url string) *HTTPStub {
 	return &HTTPStub{name: name, URL: url}
 }
 
-// On configures a response for a given method and path.
-// Call this in your Given phase before the action under test.
+// On begins configuring a response for a given method and path.
 func (s *HTTPStub) On(method, path string) *StubResponse {
 	return &StubResponse{stub: s, method: method, path: path}
 }
 
 // Calls returns all recorded requests matching the given method and path.
-// Call this in your Then phase to assert the application called the dependency.
-func (s *HTTPStub) Calls(method, path string) []RecordedCall {
+func (s *HTTPStub) Calls(method, path string) RecordedCalls {
 	return nil // TODO: query management API
-}
-
-// Reset clears all configured responses and recorded calls.
-// Register it via t.Cleanup(stub.Reset) in the data factory to reset between tests.
-func (s *HTTPStub) Reset() {
-	// TODO: call management API
 }
 
 func (s *HTTPStub) start() {
@@ -48,9 +38,17 @@ func (s *HTTPStub) start() {
 
 // StubResponse is a fluent builder for configuring a stub response.
 type StubResponse struct {
-	stub   *HTTPStub
-	method string
-	path   string
+	stub    *HTTPStub
+	method  string
+	path    string
+	matcher Matcher
+}
+
+// WithBody narrows this response to requests whose body satisfies the matcher.
+// Use this to isolate parallel tests by matching on unique data (e.g. an order ID).
+func (r *StubResponse) WithBody(m Matcher) *StubResponse {
+	r.matcher = m
+	return r
 }
 
 func (r *StubResponse) Return(status int, body string) {
@@ -63,4 +61,40 @@ type RecordedCall struct {
 	Path    string
 	Headers map[string]string
 	Body    []byte
+}
+
+// RecordedCalls is a filterable slice of recorded requests.
+type RecordedCalls []RecordedCall
+
+// WithBody returns only the calls whose body satisfies the matcher.
+func (c RecordedCalls) WithBody(m Matcher) RecordedCalls {
+	var out RecordedCalls
+	for _, call := range c {
+		if m(call.Body) {
+			out = append(out, call)
+		}
+	}
+	return out
+}
+
+// Matcher is a predicate over a request body.
+type Matcher func(body []byte) bool
+
+// Contains returns a Matcher that passes when the body contains s.
+func Contains(s string) Matcher {
+	return func(body []byte) bool {
+		return len(s) > 0 && contains(body, []byte(s))
+	}
+}
+
+func contains(haystack, needle []byte) bool {
+	if len(needle) > len(haystack) {
+		return false
+	}
+	for i := range haystack[:len(haystack)-len(needle)+1] {
+		if string(haystack[i:i+len(needle)]) == string(needle) {
+			return true
+		}
+	}
+	return false
 }
