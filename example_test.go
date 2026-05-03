@@ -53,8 +53,8 @@ func (th *OrderThen) OrderIsAccepted() *OrderThen {
 // orderSuite is defined once per test suite and called with t in each test case.
 var orderSuite = qa.NewSuite(
 	func(ctx *qa.Ctx[*OrderData]) *OrderGiven { return &OrderGiven{ctx} },
-	func(ctx *qa.Ctx[*OrderData]) *OrderWhen  { return &OrderWhen{ctx} },
-	func(ctx *qa.Ctx[*OrderData]) *OrderThen  { return &OrderThen{ctx} },
+	func(ctx *qa.Ctx[*OrderData]) *OrderWhen { return &OrderWhen{ctx} },
+	func(ctx *qa.Ctx[*OrderData]) *OrderThen { return &OrderThen{ctx} },
 	func() *OrderData { return &OrderData{} },
 )
 
