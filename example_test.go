@@ -13,13 +13,17 @@ import (
 	"github.com/kyuff/qa/httpstub"
 )
 
-// Fixed address so the app can always reach the stub, regardless of mode.
-var paymentStub = httpstub.New("payments", httpstub.WithAddr("localhost:19001"))
+// URL is resolved from the env var or the coded default at package init time,
+// so it is ready when WithApp evaluates its arguments.
+var paymentStub = httpstub.New(
+	httpstub.WithAddrEnv("PAYMENT_STUB_URL"),
+)
 
 func TestMain(m *testing.M) {
-	// paymentStub.URL is set at construction (WithAddr), so it is ready here.
 	os.Exit(qa.Run(m,
-		qa.WithStub(paymentStub),
+		qa.WithStub("payments", paymentStub),
+		// WithControlAddr + WithControlAddrEnv required for stubs-only / ci modes.
+		// Omitted here so the example runs locally on a random port.
 		qa.WithApp("./cmd/myapp", "--payment-url="+paymentStub.URL),
 	))
 }

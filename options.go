@@ -1,19 +1,28 @@
 package qa
 
+import "os"
+
+type namedStub struct {
+	name string
+	stub Stub
+}
+
 type config struct {
-	stubs []Stub
-	app   appController
+	namedStubs  []namedStub
+	app         appController
+	controlAddr string
+	controlEnv  string
 }
 
 // Option configures a Run call.
 type Option func(*config)
 
-// WithStub registers a Stub to be started before tests run and stopped after.
-// In ci mode the stub is not started (it is already running from the prior
-// stubs-only invocation).
-func WithStub(s Stub) Option {
+// WithStub registers a stub under a logical name used for control server routing.
+// The name should match the Docker service name in CI environments so that
+// hostname-based routing works without additional configuration.
+func WithStub(name string, s Stub) Option {
 	return func(cfg *config) {
-		cfg.stubs = append(cfg.stubs, s)
+		cfg.namedStubs = append(cfg.namedStubs, namedStub{name: name, stub: s})
 	}
 }
 
@@ -25,8 +34,25 @@ func WithApp(cmd string, args ...string) Option {
 	}
 }
 
+// WithControlAddr sets the address for the central control server.
+// Required in stubs-only and ci modes so both processes agree on the address.
+// Defaults to a random port suitable for local-only use.
+func WithControlAddr(addr string) Option {
+	return func(cfg *config) {
+		cfg.controlAddr = addr
+	}
+}
+
+// WithControlAddrEnv names an environment variable that overrides WithControlAddr.
+// Use this to configure the control server address in CI without hardcoding it.
+func WithControlAddrEnv(envVar string) Option {
+	return func(cfg *config) {
+		cfg.controlEnv = envVar
+	}
+}
+
 func defaultConfig() *config {
-	return applyOptions(&config{})
+	return &config{controlAddr: "localhost:0"}
 }
 
 func applyOptions(cfg *config, opts ...Option) *config {
@@ -34,4 +60,13 @@ func applyOptions(cfg *config, opts ...Option) *config {
 		opt(cfg)
 	}
 	return cfg
+}
+
+func resolveControlAddr(cfg *config) string {
+	if cfg.controlEnv != "" {
+		if v := os.Getenv(cfg.controlEnv); v != "" {
+			return v
+		}
+	}
+	return cfg.controlAddr
 }

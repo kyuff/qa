@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"sync"
-	"time"
 )
 
 type httpRule struct {
@@ -30,85 +30,109 @@ type ruleRequest struct {
 }
 
 // HTTP is a controllable HTTP server that records incoming requests and returns
-// configured responses. All management (rule registration, call queries, shutdown)
-// uses an HTTP protocol so the same code path runs in every mode.
+// configured responses. Rules and call queries are routed through the qa control
+// server, so the same code path works in local, stubs-only, and ci modes.
 //
-// Use WithAddr to set a fixed host:port. Required for stubs-only and ci modes
-// where the application must reach the stub at a known address.
-// Omitting WithAddr assigns a random port, which is fine for local-only use.
+// Construct with New and register with qa.WithStub. The runtime sets the
+// management URL before tests run; On and Calls use it automatically.
 type HTTP struct {
-	// URL is the base address the application should call.
-	// Set at construction when WithAddr is used, or after Start returns otherwise.
-	URL  string
-	name string
-	cfg  *config
+	// URL is the address the application under test should be configured to call.
+	// Set at construction when WithAddr (or WithAddrEnv) resolves to a fixed port,
+	// or after Start binds when using a random port.
+	URL string
 
-	mu       sync.RWMutex
-	rules    []httpRule
-	calls    []RecordedCall
-	srv      *http.Server
-	done     chan struct{}
-	doneOnce sync.Once
+	cfg           *config
+	managementURL string
+
+	mu    sync.RWMutex
+	rules []httpRule
+	calls []RecordedCall
+	srv   *http.Server
+
+	ready     chan struct{}
+	readyOnce sync.Once
 }
 
-// New creates an HTTP stub. Call Start to bring it up, or register it with
-// qa.WithStub which calls Start automatically in local and stubs-only modes.
-func New(name string, opts ...Option) *HTTP {
+// New creates an HTTP stub. Register it with qa.WithStub; the runtime calls
+// Start automatically in local and stubs-only modes.
+func New(opts ...Option) *HTTP {
 	cfg := applyOptions(defaultConfig(), opts...)
 	s := &HTTP{
-		name: name,
-		cfg:  cfg,
-		done: make(chan struct{}),
+		cfg:   cfg,
+		ready: make(chan struct{}),
 	}
-	if cfg.addr != "localhost:0" {
-		s.URL = "http://" + cfg.addr
+	addr := cfg.resolveAddr()
+	_, port, err := net.SplitHostPort(addr)
+	if err == nil && port != "0" {
+		s.URL = "http://" + addr
 	}
 	return s
 }
 
-// Start binds the port and starts the HTTP server in the background.
-// It returns once the server is ready to accept connections.
+// SetManagementURL is called by the qa runtime to point On and Calls at the
+// correct path on the control server. Not part of the public API.
+func (s *HTTP) SetManagementURL(u string) {
+	s.managementURL = u
+}
+
+// Start binds the port, signals readiness, then blocks until Stop is called.
+// The port is extracted from the resolved address; the server listens on all
+// interfaces so Docker networking can reach it when the hostname differs from
+// localhost.
 func (s *HTTP) Start(_ context.Context) error {
-	ln, err := net.Listen("tcp", s.cfg.addr)
+	addr := s.cfg.resolveAddr()
+	_, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return fmt.Errorf("stub %s: listen: %w", s.name, err)
+		return fmt.Errorf("httpstub: invalid addr %q: %w", addr, err)
 	}
+
+	ln, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		return fmt.Errorf("httpstub: listen :%s: %w", port, err)
+	}
+
 	if s.URL == "" {
 		s.URL = "http://" + ln.Addr().String()
 	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/_qa/rules", s.handleRules)
-	mux.HandleFunc("/_qa/calls", s.handleCalls)
-	mux.HandleFunc("/_qa/shutdown", s.handleShutdown)
 	mux.HandleFunc("/", s.handleApp)
 	s.srv = &http.Server{Handler: mux}
-	go s.srv.Serve(ln) //nolint:errcheck
+
+	s.readyOnce.Do(func() { close(s.ready) })
+
+	if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
 	return nil
 }
 
-// Stop sends a shutdown signal to the stub over HTTP.
-// Safe to call from any mode; also unblocks any concurrent Wait call.
+// Stop shuts down the HTTP server, causing Start to return.
 func (s *HTTP) Stop(ctx context.Context) {
-	if s.URL == "" {
+	if s.srv == nil {
 		return
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.URL+"/_qa/shutdown", nil)
-	if err != nil {
-		return
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err == nil {
-		resp.Body.Close()
-	}
-	s.doneOnce.Do(func() { close(s.done) })
+	s.srv.Shutdown(ctx) //nolint:errcheck
 }
 
-// Wait blocks until the stub receives a shutdown signal or ctx is cancelled.
-func (s *HTTP) Wait(ctx context.Context) {
+// Probe returns nil once the server has bound its port and is ready to serve.
+func (s *HTTP) Probe() error {
 	select {
-	case <-s.done:
-	case <-ctx.Done():
+	case <-s.ready:
+		return nil
+	default:
+		return errors.New("not ready")
 	}
+}
+
+// Handler returns the management http.Handler mounted by the qa control server.
+// It exposes POST /rules and GET /calls for the test process to register
+// stub behaviour and query recorded calls.
+func (s *HTTP) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /rules", s.handleRules)
+	mux.HandleFunc("GET /calls", s.handleCalls)
+	return mux
 }
 
 // On begins configuring a response for the given method and path.
@@ -121,7 +145,7 @@ func (s *HTTP) Calls(method, path string) RecordedCalls {
 	q := url.Values{}
 	q.Set("method", method)
 	q.Set("path", path)
-	resp, err := http.Get(s.URL + "/_qa/calls?" + q.Encode())
+	resp, err := http.Get(s.managementURL + "/calls?" + q.Encode())
 	if err != nil {
 		return nil
 	}
@@ -142,7 +166,7 @@ func (s *HTTP) postRule(method, path string, matcher Matcher, status int, body s
 		req.BodyContains = c.value
 	}
 	data, _ := json.Marshal(req)
-	resp, err := http.Post(s.URL+"/_qa/rules", "application/json", bytes.NewReader(data))
+	resp, err := http.Post(s.managementURL+"/rules", "application/json", bytes.NewReader(data))
 	if err == nil {
 		resp.Body.Close()
 	}
@@ -188,10 +212,6 @@ func (s *HTTP) handleApp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTP) handleRules(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
 	var req ruleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -228,14 +248,4 @@ func (s *HTTP) handleCalls(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out) //nolint:errcheck
-}
-
-func (s *HTTP) handleShutdown(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	s.doneOnce.Do(func() { close(s.done) })
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.srv.Shutdown(ctx) //nolint:errcheck
-	}()
 }

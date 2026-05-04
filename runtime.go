@@ -3,7 +3,9 @@ package qa
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
+	"time"
 )
 
 // testingM is the subset of *testing.M used by Run.
@@ -11,58 +13,118 @@ type testingM interface {
 	Run() int
 }
 
+// managementURLSetter is implemented by stubs that need to know their
+// management URL on the control server (e.g. to route On/Calls calls).
+type managementURLSetter interface {
+	SetManagementURL(url string)
+}
+
 // Run executes the test suite according to the current QA_MODE:
 //
-//   - local (default): starts all stubs and the application, runs tests, then stops everything.
-//   - stubs-only: starts all stubs and blocks until they receive a shutdown signal
-//     from the ci-mode binary. Tests are not run.
-//   - ci: runs tests, then sends a shutdown signal to all stubs.
-//
-// Stubs that an application connects to must use stubs.WithAddr so their URL is
-// known at argument-evaluation time, before Run is called.
+//   - local (default): starts the control server and all stubs, runs tests, stops everything.
+//   - stubs-only: starts the control server and all stubs, then blocks until the
+//     ci-mode binary sends POST /_qa/shutdown to the control server.
+//   - ci: configures stubs to proxy to the stubs-only control server, runs tests,
+//     then sends shutdown to the control server.
 func Run(m testingM, opts ...Option) int {
 	cfg := applyOptions(defaultConfig(), opts...)
 	ctx := context.Background()
-
-	if currentRunMode() != runModeCI {
-		for _, s := range cfg.stubs {
-			if err := s.Start(ctx); err != nil {
-				panic(fmt.Sprintf("qa: failed to start stub: %v", err))
-			}
-		}
-	}
+	controlAddr := resolveControlAddr(cfg)
 
 	switch currentRunMode() {
-	case runModeStubsOnly:
+	case runModeCI:
+		controlURL := "http://" + controlAddr
+		setManagementURLs(cfg.namedStubs, controlURL)
+
+		code := m.Run()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, controlURL+"/_qa/shutdown", nil)
+		if err == nil {
+			if resp, err := http.DefaultClient.Do(req); err == nil {
+				resp.Body.Close()
+			}
+		}
+		return code
+
+	default: // local and stubs-only share startup; differ only in what runs next
+		cs := newControlServer(controlAddr)
+		for _, ns := range cfg.namedStubs {
+			cs.mount(ns.name, ns.stub.Handler())
+		}
+		if err := cs.start(); err != nil {
+			panic(fmt.Sprintf("qa: %v", err))
+		}
+
+		setManagementURLs(cfg.namedStubs, cs.URL)
+
+		stubCtx, stubCancel := context.WithCancel(context.Background())
 		var wg sync.WaitGroup
-		for _, s := range cfg.stubs {
+		for _, ns := range cfg.namedStubs {
 			wg.Add(1)
 			go func(s Stub) {
 				defer wg.Done()
-				s.Wait(ctx)
-			}(s)
+				if err := s.Start(stubCtx); err != nil {
+					// port-in-use and similar errors surface here
+					fmt.Printf("qa: stub exited: %v\n", err)
+				}
+			}(ns.stub)
 		}
-		wg.Wait()
-		return 0
 
-	case runModeCI:
-		code := m.Run()
-		for _, s := range cfg.stubs {
-			s.Stop(ctx)
-		}
-		return code
+		probeCtx, probeCancel := context.WithTimeout(stubCtx, 30*time.Second)
+		probeAll(probeCtx, cfg.namedStubs)
+		probeCancel()
 
-	default: // local
-		if cfg.app != nil {
-			if err := cfg.app.start(ctx); err != nil {
-				panic(fmt.Sprintf("qa: failed to start app: %v", err))
+		var code int
+		if currentRunMode() == runModeStubsOnly {
+			cs.wait(ctx)
+		} else {
+			if cfg.app != nil {
+				if err := cfg.app.start(ctx); err != nil {
+					panic(fmt.Sprintf("qa: app: %v", err))
+				}
+				defer cfg.app.stop(ctx)
 			}
-			defer cfg.app.stop(ctx)
+			code = m.Run()
 		}
-		code := m.Run()
-		for _, s := range cfg.stubs {
-			s.Stop(ctx)
+
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stopCancel()
+		for _, ns := range cfg.namedStubs {
+			ns.stub.Stop(stopCtx)
 		}
+		stubCancel()
+		wg.Wait()
+		cs.stop(stopCtx)
 		return code
 	}
+}
+
+func setManagementURLs(stubs []namedStub, controlURL string) {
+	for _, ns := range stubs {
+		if s, ok := ns.stub.(managementURLSetter); ok {
+			s.SetManagementURL(controlURL + "/_qa/stubs/" + ns.name)
+		}
+	}
+}
+
+func probeAll(ctx context.Context, stubs []namedStub) {
+	var wg sync.WaitGroup
+	for _, ns := range stubs {
+		wg.Add(1)
+		go func(s Stub) {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if s.Probe() == nil {
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}(ns.stub)
+	}
+	wg.Wait()
 }

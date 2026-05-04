@@ -18,7 +18,7 @@ func TestHTTP(t *testing.T) {
 			)
 
 			// act
-			sut := httpstub.New(t.Name(), httpstub.WithAddr(addr))
+			sut := httpstub.New(httpstub.WithAddr(addr))
 
 			// assert
 			if sut.URL != "http://"+addr {
@@ -28,11 +28,43 @@ func TestHTTP(t *testing.T) {
 
 		t.Run("should leave URL empty when using random port", func(t *testing.T) {
 			// act
-			sut := httpstub.New(t.Name())
+			sut := httpstub.New()
 
 			// assert
 			if sut.URL != "" {
 				t.Errorf("expected empty URL before Start, got %q", sut.URL)
+			}
+		})
+
+		t.Run("should prefer env var over WithAddr when env var is set", func(t *testing.T) {
+			// arrange
+			t.Setenv("TEST_STUB_ADDR", "payments:19001")
+
+			// act
+			sut := httpstub.New(
+				httpstub.WithAddr("localhost:19001"),
+				httpstub.WithAddrEnv("TEST_STUB_ADDR"),
+			)
+
+			// assert
+			if sut.URL != "http://payments:19001" {
+				t.Errorf("got URL %q, want %q", sut.URL, "http://payments:19001")
+			}
+		})
+
+		t.Run("should use WithAddr when env var is not set", func(t *testing.T) {
+			// arrange — ensure the env var is absent
+			t.Setenv("TEST_STUB_ADDR_UNSET", "")
+
+			// act
+			sut := httpstub.New(
+				httpstub.WithAddr("localhost:19001"),
+				httpstub.WithAddrEnv("TEST_STUB_ADDR_UNSET"),
+			)
+
+			// assert
+			if sut.URL != "http://localhost:19001" {
+				t.Errorf("got URL %q, want %q", sut.URL, "http://localhost:19001")
 			}
 		})
 	})
@@ -41,17 +73,23 @@ func TestHTTP(t *testing.T) {
 		t.Run("should populate URL after starting with random port", func(t *testing.T) {
 			// arrange
 			var (
-				sut = httpstub.New(t.Name())
+				sut  = httpstub.New()
+				errc = make(chan error, 1)
 			)
+			go func() { errc <- sut.Start(context.Background()) }()
 			t.Cleanup(func() { sut.Stop(context.Background()) })
 
-			// act
-			err := sut.Start(context.Background())
+			// act — wait for ready
+			select {
+			case err := <-errc:
+				t.Fatalf("Start returned early: %v", err)
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for stub to be ready")
+			default:
+			}
+			waitReady(t, sut)
 
 			// assert
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
 			if sut.URL == "" {
 				t.Error("expected URL to be set after Start")
 			}
@@ -60,22 +98,50 @@ func TestHTTP(t *testing.T) {
 		t.Run("should fail when port is already in use", func(t *testing.T) {
 			// arrange
 			var (
-				first = httpstub.New("first", httpstub.WithAddr("localhost:19098"))
+				first = httpstub.New(httpstub.WithAddr("localhost:19098"))
+				errc  = make(chan error, 1)
 			)
-			if err := first.Start(context.Background()); err != nil {
-				t.Fatalf("arrange: %v", err)
-			}
+			go func() { errc <- first.Start(context.Background()) }()
+			waitReady(t, first)
 			t.Cleanup(func() { first.Stop(context.Background()) })
 
-			sut := httpstub.New("second", httpstub.WithAddr("localhost:19098"))
+			sut := httpstub.New(httpstub.WithAddr("localhost:19098"))
 
 			// act
-			err := sut.Start(context.Background())
+			startErrc := make(chan error, 1)
+			go func() { startErrc <- sut.Start(context.Background()) }()
 
 			// assert
-			if err == nil {
-				t.Error("expected error when port is already in use")
+			select {
+			case err := <-startErrc:
+				if err == nil {
+					t.Error("expected error when port is already in use")
+				}
+			case <-time.After(time.Second):
+				t.Error("expected Start to fail quickly for port already in use")
 				sut.Stop(context.Background())
+			}
+		})
+	})
+
+	t.Run("Probe", func(t *testing.T) {
+		t.Run("should return error before Start is called", func(t *testing.T) {
+			// act
+			sut := httpstub.New()
+
+			// assert
+			if sut.Probe() == nil {
+				t.Error("expected Probe to return error before Start")
+			}
+		})
+
+		t.Run("should return nil once server is ready", func(t *testing.T) {
+			// arrange
+			sut := startedHTTP(t)
+
+			// act + assert
+			if err := sut.Probe(); err != nil {
+				t.Errorf("expected Probe to return nil after Start, got %v", err)
 			}
 		})
 	})
@@ -242,85 +308,20 @@ func TestHTTP(t *testing.T) {
 			}
 		})
 	})
+}
 
-	t.Run("Stop and Wait", func(t *testing.T) {
-		t.Run("Wait should unblock after Stop is called", func(t *testing.T) {
-			// arrange
-			var (
-				sut  = httpstub.New(t.Name())
-				done = make(chan struct{})
-			)
-			if err := sut.Start(context.Background()); err != nil {
-				t.Fatalf("Start: %v", err)
-			}
-
-			go func() {
-				sut.Wait(context.Background())
-				close(done)
-			}()
-
-			// act
-			sut.Stop(context.Background())
-
-			// assert
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Error("Wait did not unblock after Stop")
-			}
-		})
-
-		t.Run("Wait should unblock when ctx is cancelled", func(t *testing.T) {
-			// arrange
-			var (
-				sut         = startedHTTP(t)
-				ctx, cancel = context.WithCancel(context.Background())
-				done        = make(chan struct{})
-			)
-
-			go func() {
-				sut.Wait(ctx)
-				close(done)
-			}()
-
-			// act
-			cancel()
-
-			// assert
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Error("Wait did not unblock after ctx cancel")
-			}
-		})
-	})
-
-	t.Run("shutdown protocol", func(t *testing.T) {
-		t.Run("ci-mode binary can shut down stubs-only stub over HTTP", func(t *testing.T) {
-			// arrange: "stubs-only" stub is just a running server
-			var (
-				server = httpstub.New(t.Name())
-				done   = make(chan struct{})
-			)
-			if err := server.Start(context.Background()); err != nil {
-				t.Fatalf("Start: %v", err)
-			}
-
-			go func() {
-				server.Wait(context.Background())
-				close(done)
-			}()
-
-			// act: "ci" binary creates a client stub pointing at the same URL
-			client := httpstub.New(t.Name(), httpstub.WithAddr(server.URL[7:])) // strip "http://"
-			client.Stop(context.Background())
-
-			// assert: the server-side Wait unblocked
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Error("server Wait did not unblock after client Stop")
-			}
-		})
-	})
+func waitReady(t *testing.T, s *httpstub.HTTP) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for stub to be ready")
+		default:
+		}
+		if s.Probe() == nil {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
 }

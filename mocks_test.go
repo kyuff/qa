@@ -6,6 +6,7 @@ package qa_test
 import (
 	"context"
 	"github.com/kyuff/qa"
+	"net/http"
 	"sync"
 )
 
@@ -19,14 +20,17 @@ var _ qa.Stub = &StubMock{}
 //
 //		// make and configure a mocked qa.Stub
 //		mockedStub := &StubMock{
+//			HandlerFunc: func() http.Handler {
+//				panic("mock out the Handler method")
+//			},
+//			ProbeFunc: func() error {
+//				panic("mock out the Probe method")
+//			},
 //			StartFunc: func(ctx context.Context) error {
 //				panic("mock out the Start method")
 //			},
 //			StopFunc: func(ctx context.Context)  {
 //				panic("mock out the Stop method")
-//			},
-//			WaitFunc: func(ctx context.Context)  {
-//				panic("mock out the Wait method")
 //			},
 //		}
 //
@@ -35,17 +39,26 @@ var _ qa.Stub = &StubMock{}
 //
 //	}
 type StubMock struct {
+	// HandlerFunc mocks the Handler method.
+	HandlerFunc func() http.Handler
+
+	// ProbeFunc mocks the Probe method.
+	ProbeFunc func() error
+
 	// StartFunc mocks the Start method.
 	StartFunc func(ctx context.Context) error
 
 	// StopFunc mocks the Stop method.
 	StopFunc func(ctx context.Context)
 
-	// WaitFunc mocks the Wait method.
-	WaitFunc func(ctx context.Context)
-
 	// calls tracks calls to the methods.
 	calls struct {
+		// Handler holds details about calls to the Handler method.
+		Handler []struct {
+		}
+		// Probe holds details about calls to the Probe method.
+		Probe []struct {
+		}
 		// Start holds details about calls to the Start method.
 		Start []struct {
 			// Ctx is the ctx argument value.
@@ -56,15 +69,65 @@ type StubMock struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 		}
-		// Wait holds details about calls to the Wait method.
-		Wait []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-		}
 	}
-	lockStart sync.RWMutex
-	lockStop  sync.RWMutex
-	lockWait  sync.RWMutex
+	lockHandler sync.RWMutex
+	lockProbe   sync.RWMutex
+	lockStart   sync.RWMutex
+	lockStop    sync.RWMutex
+}
+
+// Handler calls HandlerFunc.
+func (mock *StubMock) Handler() http.Handler {
+	if mock.HandlerFunc == nil {
+		panic("StubMock.HandlerFunc: method is nil but Stub.Handler was just called")
+	}
+	callInfo := struct {
+	}{}
+	mock.lockHandler.Lock()
+	mock.calls.Handler = append(mock.calls.Handler, callInfo)
+	mock.lockHandler.Unlock()
+	return mock.HandlerFunc()
+}
+
+// HandlerCalls gets all the calls that were made to Handler.
+// Check the length with:
+//
+//	len(mockedStub.HandlerCalls())
+func (mock *StubMock) HandlerCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockHandler.RLock()
+	calls = mock.calls.Handler
+	mock.lockHandler.RUnlock()
+	return calls
+}
+
+// Probe calls ProbeFunc.
+func (mock *StubMock) Probe() error {
+	if mock.ProbeFunc == nil {
+		panic("StubMock.ProbeFunc: method is nil but Stub.Probe was just called")
+	}
+	callInfo := struct {
+	}{}
+	mock.lockProbe.Lock()
+	mock.calls.Probe = append(mock.calls.Probe, callInfo)
+	mock.lockProbe.Unlock()
+	return mock.ProbeFunc()
+}
+
+// ProbeCalls gets all the calls that were made to Probe.
+// Check the length with:
+//
+//	len(mockedStub.ProbeCalls())
+func (mock *StubMock) ProbeCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockProbe.RLock()
+	calls = mock.calls.Probe
+	mock.lockProbe.RUnlock()
+	return calls
 }
 
 // Start calls StartFunc.
@@ -128,37 +191,5 @@ func (mock *StubMock) StopCalls() []struct {
 	mock.lockStop.RLock()
 	calls = mock.calls.Stop
 	mock.lockStop.RUnlock()
-	return calls
-}
-
-// Wait calls WaitFunc.
-func (mock *StubMock) Wait(ctx context.Context) {
-	if mock.WaitFunc == nil {
-		panic("StubMock.WaitFunc: method is nil but Stub.Wait was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-	}{
-		Ctx: ctx,
-	}
-	mock.lockWait.Lock()
-	mock.calls.Wait = append(mock.calls.Wait, callInfo)
-	mock.lockWait.Unlock()
-	mock.WaitFunc(ctx)
-}
-
-// WaitCalls gets all the calls that were made to Wait.
-// Check the length with:
-//
-//	len(mockedStub.WaitCalls())
-func (mock *StubMock) WaitCalls() []struct {
-	Ctx context.Context
-} {
-	var calls []struct {
-		Ctx context.Context
-	}
-	mock.lockWait.RLock()
-	calls = mock.calls.Wait
-	mock.lockWait.RUnlock()
 	return calls
 }
