@@ -41,7 +41,7 @@ var suite = qa.NewSuite(
 	func(ctx *qa.Ctx[*testData]) *testGiven { return &testGiven{ctx} },
 	func(ctx *qa.Ctx[*testData]) *testWhen { return &testWhen{ctx} },
 	func(ctx *qa.Ctx[*testData]) *testThen { return &testThen{ctx} },
-	func() *testData { return &testData{} },
+	func(t *testing.T) *testData { return &testData{} },
 )
 
 func TestSuite(t *testing.T) {
