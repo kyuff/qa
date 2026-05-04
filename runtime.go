@@ -82,13 +82,15 @@ func Run(m testingM, opts ...Option) int {
 				if err := cfg.app.start(ctx); err != nil {
 					panic(fmt.Sprintf("qa: app: %v", err))
 				}
-				defer cfg.app.stop(ctx)
 			}
 			code = m.Run()
 		}
 
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stopCancel()
+		if cfg.app != nil {
+			cfg.app.stop(stopCtx)
+		}
 		for _, ns := range cfg.namedStubs {
 			ns.stub.Stop(stopCtx)
 		}

@@ -24,7 +24,9 @@ func TestMain(m *testing.M) {
 		qa.WithStub("payments", paymentStub),
 		// WithControlAddr + WithControlAddrEnv required for stubs-only / ci modes.
 		// Omitted here so the example runs locally on a random port.
-		qa.WithAppCmd("./cmd/myapp", "--payment-url="+paymentStub.URL),
+		//
+		// In a real test suite:
+		//   qa.WithAppCmd("./cmd/myapp", "--payment-url="+paymentStub.URL),
 	))
 }
 
