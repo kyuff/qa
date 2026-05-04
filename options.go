@@ -8,10 +8,11 @@ type namedStub struct {
 }
 
 type config struct {
-	namedStubs  []namedStub
-	app         appController
-	controlAddr string
-	controlEnv  string
+	namedStubs   []namedStub
+	app          appController
+	appHealthURL string
+	controlAddr  string
+	controlEnv   string
 }
 
 // Option configures a Run call.
@@ -26,11 +27,22 @@ func WithStub(name string, s Stub) Option {
 	}
 }
 
-// WithApp configures the application to start locally before tests run.
+// WithAppCmd configures a command to start locally before tests run.
+// The child process inherits the test process environment.
 // Ignored in stubs-only and ci modes.
-func WithApp(cmd string, args ...string) Option {
+func WithAppCmd(cmd string, args ...string) Option {
 	return func(cfg *config) {
 		cfg.app = &localApp{cmd: cmd, args: args}
+	}
+}
+
+// WithAppHealthCheck configures a URL to probe after starting the app locally.
+// qa.Run blocks until the URL returns 200 OK before running tests.
+// Uses the same 30-second timeout as stub probing.
+// Ignored in stubs-only and ci modes.
+func WithAppHealthCheck(url string) Option {
+	return func(cfg *config) {
+		cfg.appHealthURL = url
 	}
 }
 
@@ -52,7 +64,7 @@ func WithControlAddrEnv(envVar string) Option {
 }
 
 func defaultConfig() *config {
-	return &config{controlAddr: "localhost:0"}
+	return &config{}
 }
 
 func applyOptions(cfg *config, opts ...Option) *config {
@@ -68,5 +80,11 @@ func resolveControlAddr(cfg *config) string {
 			return v
 		}
 	}
-	return cfg.controlAddr
+	if cfg.controlAddr != "" {
+		return cfg.controlAddr
+	}
+	if v := os.Getenv("QA_CONTROL_ADDR"); v != "" {
+		return v
+	}
+	return "localhost:0"
 }

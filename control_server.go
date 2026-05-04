@@ -27,6 +27,11 @@ func newControlServer(addr string) *controlServer {
 		mux:  http.NewServeMux(),
 		done: make(chan struct{}),
 	}
+	cs.mux.HandleFunc("GET /_qa/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"ok"}`)
+	})
 	cs.mux.HandleFunc("POST /_qa/shutdown", cs.handleShutdown)
 	return cs
 }

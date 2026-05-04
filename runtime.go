@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,8 +31,13 @@ func Run(m testingM, opts ...Option) int {
 	cfg := applyOptions(defaultConfig(), opts...)
 	ctx := context.Background()
 	controlAddr := resolveControlAddr(cfg)
+	mode := currentRunMode()
 
-	switch currentRunMode() {
+	if mode != runModeLocal && strings.HasSuffix(controlAddr, ":0") {
+		panic(fmt.Sprintf("qa: %s mode requires a fixed control server address — use WithControlAddr or set QA_CONTROL_ADDR", mode))
+	}
+
+	switch mode {
 	case runModeCI:
 		controlURL := "http://" + controlAddr
 		setManagementURLs(cfg.namedStubs, controlURL)
@@ -75,20 +81,27 @@ func Run(m testingM, opts ...Option) int {
 		probeCancel()
 
 		var code int
-		if currentRunMode() == runModeStubsOnly {
+		if mode == runModeStubsOnly {
 			cs.wait(ctx)
 		} else {
 			if cfg.app != nil {
 				if err := cfg.app.start(ctx); err != nil {
 					panic(fmt.Sprintf("qa: app: %v", err))
 				}
-				defer cfg.app.stop(ctx)
+				if cfg.appHealthURL != "" {
+					healthCtx, healthCancel := context.WithTimeout(ctx, 30*time.Second)
+					probeURL(healthCtx, cfg.appHealthURL)
+					healthCancel()
+				}
 			}
 			code = m.Run()
 		}
 
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stopCancel()
+		if cfg.app != nil {
+			cfg.app.stop(stopCtx)
+		}
 		for _, ns := range cfg.namedStubs {
 			ns.stub.Stop(stopCtx)
 		}
@@ -104,6 +117,24 @@ func setManagementURLs(stubs []namedStub, controlURL string) {
 		if s, ok := ns.stub.(managementURLSetter); ok {
 			s.SetManagementURL(controlURL + "/_qa/stubs/" + ns.name)
 		}
+	}
+}
+
+func probeURL(ctx context.Context, url string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		resp, err := http.Get(url) //nolint:noctx
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
