@@ -14,7 +14,7 @@ import (
 )
 
 // URL is resolved from the env var or the coded default at package init time,
-// so it is ready when WithApp evaluates its arguments.
+// so it is ready when WithAppCmd evaluates its arguments.
 var paymentStub = httpstub.New(
 	httpstub.WithAddrEnv("PAYMENT_STUB_URL"),
 )
@@ -24,7 +24,7 @@ func TestMain(m *testing.M) {
 		qa.WithStub("payments", paymentStub),
 		// WithControlAddr + WithControlAddrEnv required for stubs-only / ci modes.
 		// Omitted here so the example runs locally on a random port.
-		qa.WithApp("./cmd/myapp", "--payment-url="+paymentStub.URL),
+		qa.WithAppCmd("./cmd/myapp", "--payment-url="+paymentStub.URL),
 	))
 }
 

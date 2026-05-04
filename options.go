@@ -26,9 +26,10 @@ func WithStub(name string, s Stub) Option {
 	}
 }
 
-// WithApp configures the application to start locally before tests run.
+// WithAppCmd configures a command to start locally before tests run.
+// The child process inherits the test process environment.
 // Ignored in stubs-only and ci modes.
-func WithApp(cmd string, args ...string) Option {
+func WithAppCmd(cmd string, args ...string) Option {
 	return func(cfg *config) {
 		cfg.app = &localApp{cmd: cmd, args: args}
 	}

@@ -8,7 +8,7 @@ type Option func(*config)
 // WithAddr sets the default address (host:port) for the stub.
 // The URL is derived from this value and set immediately at construction,
 // so it is available before Start is called — important when passed to
-// WithApp before qa.Run processes its options.
+// WithAppCmd before qa.Run processes its options.
 func WithAddr(addr string) Option {
 	return func(cfg *config) {
 		cfg.addr = addr
