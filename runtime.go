@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,8 +31,13 @@ func Run(m testingM, opts ...Option) int {
 	cfg := applyOptions(defaultConfig(), opts...)
 	ctx := context.Background()
 	controlAddr := resolveControlAddr(cfg)
+	mode := currentRunMode()
 
-	switch currentRunMode() {
+	if mode != runModeLocal && strings.HasSuffix(controlAddr, ":0") {
+		panic(fmt.Sprintf("qa: %s mode requires a fixed control server address — use WithControlAddr or set QA_CONTROL_ADDR", mode))
+	}
+
+	switch mode {
 	case runModeCI:
 		controlURL := "http://" + controlAddr
 		setManagementURLs(cfg.namedStubs, controlURL)
@@ -75,7 +81,7 @@ func Run(m testingM, opts ...Option) int {
 		probeCancel()
 
 		var code int
-		if currentRunMode() == runModeStubsOnly {
+		if mode == runModeStubsOnly {
 			cs.wait(ctx)
 		} else {
 			if cfg.app != nil {

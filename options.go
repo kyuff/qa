@@ -64,7 +64,7 @@ func WithControlAddrEnv(envVar string) Option {
 }
 
 func defaultConfig() *config {
-	return &config{controlAddr: "localhost:0"}
+	return &config{}
 }
 
 func applyOptions(cfg *config, opts ...Option) *config {
@@ -80,5 +80,11 @@ func resolveControlAddr(cfg *config) string {
 			return v
 		}
 	}
-	return cfg.controlAddr
+	if cfg.controlAddr != "" {
+		return cfg.controlAddr
+	}
+	if v := os.Getenv("QA_CONTROL_ADDR"); v != "" {
+		return v
+	}
+	return "localhost:0"
 }
