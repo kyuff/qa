@@ -91,3 +91,43 @@ Each stage's `Run` call produces a named sub-test prefixed with the stage name:
 ## Data sharing
 
 `Data` is initialised once per test case via the `data` factory passed to `NewSuite`. Using a pointer type (`*Data`) lets all three stages read and write shared state — for example, `When` can store a created order ID that `Then` later asserts on.
+
+## qa.Run
+
+`qa.Run` is the entry point for the test suite. Call it from `TestMain` and pass it your stubs and, in local mode, the command to start your application:
+
+```go
+func TestMain(m *testing.M) {
+    os.Exit(qa.Run(m,
+        qa.WithStub("payments", paymentStub),
+        qa.WithControlAddr("localhost:9000"),
+        qa.WithAppCmd("go", "run", "./cmd/myapp", "--payment-url=http://localhost:19001"),
+        qa.WithAppHealthCheck("http://localhost:8080/health"),
+    ))
+}
+```
+
+`qa.Run` operates in one of three modes, selected by the `QA_MODE` environment variable:
+
+| `QA_MODE` | Behaviour |
+|-----------|-----------|
+| *(unset)* | **Local** — starts stubs, starts the app via `WithAppCmd`, runs tests, shuts everything down |
+| `stubs-only` | **Stubs** — starts stubs and the control server, blocks until the CI test step sends a shutdown signal |
+| `ci` | **CI** — proxies stub interactions to a running stubs process, runs tests, sends shutdown |
+
+### Stubs
+
+Stubs are HTTP servers that stand in for real external services. Register them with `WithStub` and configure rules in your tests using the `httpstub` package:
+
+```go
+var paymentStub = httpstub.New(
+    httpstub.WithAddr("0.0.0.0:19001"),
+)
+
+// in a test:
+paymentStub.On("POST", "/charge").
+    WithBody(httpstub.Contains(orderID)).
+    Return(200, `{"ok":true}`)
+```
+
+See [docs/github-actions.md](docs/github-actions.md) for a complete CI setup with GitHub Actions and Docker Compose.
