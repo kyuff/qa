@@ -1,7 +1,7 @@
 # GitHub Actions Integration
 
-This guide shows how to wire `qa` into a GitHub Actions workflow using Docker Compose to
-run the full integration suite in CI.
+This guide shows how to wire `qa` into a GitHub Actions workflow. The stubs run directly
+on the CI runner as a background process, so no extra Dockerfile is needed.
 
 ## How it works in CI
 
@@ -9,13 +9,13 @@ run the full integration suite in CI.
 |------|-----------|-----------|
 | Unit tests | `go test ./internal/...` | *(unset)* |
 | Build image | `docker build` | — |
-| Compose up | postgres + stubs container + app container | `stubs-only` (inside stubs container) |
+| Start stubs | compiled test binary, background | `stubs-only` |
+| Compose up | postgres + app container | — |
 | QA tests | `go test ./tests/...` on the runner | `ci` |
 
-The stubs container runs the compiled test binary in `stubs-only` mode, which starts the
-control server and all registered stubs but neither the app nor the tests. Once everything
-is healthy, the runner executes the tests in `ci` mode, which proxies all stub interactions
-to the stubs container and sends a shutdown signal when the tests are done.
+The stubs process binds on all interfaces so the app container can reach it via
+`host.docker.internal`. The control server listens on `localhost:9000`, which is shared by
+both the stubs process and the CI test step since they both run on the same runner.
 
 ## File layout
 
@@ -26,15 +26,10 @@ to the stubs container and sends a shutdown signal when the tests are done.
 ├── tests/
 │   └── main_test.go    # TestMain — wires qa.Run
 ├── Dockerfile          # builds the app image
-├── Dockerfile.qa       # builds the test binary for the stubs container
 └── docker-compose.qa.yml
 ```
 
 ## tests/main_test.go
-
-Stub addresses are fixed ports so that the stubs container and the app container can agree
-on them without runtime coordination. `WithControlAddrEnv` lets CI override the bind address
-(`0.0.0.0:9000` in the container) while local development falls back to `localhost:9000`.
 
 ```go
 package tests
@@ -48,17 +43,12 @@ import (
 )
 
 var paymentStub = httpstub.New(
-    httpstub.WithAddr("0.0.0.0:19001"), // fixed port, listens on all interfaces
+    httpstub.WithAddr("0.0.0.0:19001"), // fixed port, all interfaces so Docker can reach it
 )
 
 func TestMain(m *testing.M) {
     os.Exit(qa.Run(m,
         qa.WithStub("payments", paymentStub),
-
-        // QA_CONTROL_ADDR overrides the local default.
-        // stubs container:  QA_CONTROL_ADDR=0.0.0.0:9000  (bind on all interfaces)
-        // CI test step:     QA_CONTROL_ADDR=localhost:9000 (connect via published port)
-        qa.WithControlAddrEnv("QA_CONTROL_ADDR"),
         qa.WithControlAddr("localhost:9000"),
 
         // WithAppCmd and WithAppHealthCheck are only used in local mode.
@@ -72,8 +62,6 @@ func TestMain(m *testing.M) {
 ```
 
 ## Dockerfile
-
-Standard multi-stage build for the application:
 
 ```dockerfile
 FROM golang:1.24-alpine AS builder
@@ -90,29 +78,10 @@ EXPOSE 8080
 ENTRYPOINT ["/myapp"]
 ```
 
-## Dockerfile.qa
-
-Compiles the test binary and packages it as a container for the stubs container:
-
-```dockerfile
-FROM golang:1.24-alpine AS builder
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go test -c -o /qa-tests ./tests/
-
-FROM alpine:3.19
-RUN apk add --no-cache curl
-COPY --from=builder /qa-tests /qa-tests
-ENTRYPOINT ["/qa-tests"]
-```
-
 ## docker-compose.qa.yml
 
-Starts postgres, the stubs container, and the application together.
-The app connects to the stubs via the internal Docker network (`stubs:19001`).
-The CI runner connects to the control server via the published port (`localhost:9000`).
+The app reaches the stubs on the runner via `host.docker.internal`. The `host-gateway`
+extra host entry is required on Linux (which GitHub Actions uses).
 
 ```yaml
 name: myapp-qa
@@ -130,31 +99,15 @@ services:
       timeout: 5s
       retries: 10
 
-  stubs:
-    build:
-      context: .
-      dockerfile: Dockerfile.qa
-    environment:
-      QA_MODE: stubs-only
-      QA_CONTROL_ADDR: "0.0.0.0:9000"
-    ports:
-      - "9000:9000"     # control server — reached by the CI test step on the runner
-      - "19001:19001"   # payment stub — published for local debugging; app uses the internal address
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/_qa/health"]
-      interval: 2s
-      timeout: 5s
-      retries: 15
-
   app:
     image: myapp:${IMAGE_TAG}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATABASE_URL: postgres://myapp:secret@postgres:5432/myapp?sslmode=disable
-      PAYMENT_STUB_URL: http://stubs:19001
+      PAYMENT_STUB_URL: http://host.docker.internal:19001
     depends_on:
       postgres:
-        condition: service_healthy
-      stubs:
         condition: service_healthy
     ports:
       - "8080:8080"
@@ -200,7 +153,22 @@ jobs:
       - name: Build app image
         run: docker build -t myapp:${{ github.sha }} .
 
-      - name: Start infrastructure, stubs and app
+      - name: Build test binary
+        run: go test -c -o qa-tests ./tests/
+
+      - name: Start stubs
+        env:
+          QA_MODE: stubs-only
+          QA_CONTROL_ADDR: localhost:9000
+        run: ./qa-tests &
+
+      - name: Wait for stubs
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/_qa/health && break || sleep 1
+          done
+
+      - name: Start infrastructure and app
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: docker compose -f docker-compose.qa.yml up -d --wait
@@ -222,8 +190,8 @@ jobs:
 
 ## Running locally
 
-With no environment variables set, `qa.Run` defaults to local mode: stubs start, then the app
-is started via `WithAppCmd`, then the tests run, and everything shuts down in order.
+With no environment variables set, `qa.Run` defaults to local mode: stubs start, then the
+app is started via `WithAppCmd`, then the tests run, and everything shuts down in order.
 
 ```sh
 go test ./tests/ -count 1 -v
