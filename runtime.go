@@ -82,6 +82,11 @@ func Run(m testingM, opts ...Option) int {
 				if err := cfg.app.start(ctx); err != nil {
 					panic(fmt.Sprintf("qa: app: %v", err))
 				}
+				if cfg.appHealthURL != "" {
+					healthCtx, healthCancel := context.WithTimeout(ctx, 30*time.Second)
+					probeURL(healthCtx, cfg.appHealthURL)
+					healthCancel()
+				}
 			}
 			code = m.Run()
 		}
@@ -106,6 +111,24 @@ func setManagementURLs(stubs []namedStub, controlURL string) {
 		if s, ok := ns.stub.(managementURLSetter); ok {
 			s.SetManagementURL(controlURL + "/_qa/stubs/" + ns.name)
 		}
+	}
+}
+
+func probeURL(ctx context.Context, url string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		resp, err := http.Get(url) //nolint:noctx
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
