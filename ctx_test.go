@@ -8,60 +8,68 @@ import (
 	"github.com/kyuff/qa"
 )
 
-func newTestingTMock() *TestingTMock {
-	return &TestingTMock{
-		HelperFunc: func() {},
-		FatalfFunc: func(format string, args ...any) {},
-	}
-}
-
 func TestCtx_Eventually(t *testing.T) {
-	t.Run("should call Fatalf when fn never returns nil within window", func(t *testing.T) {
+	t.Run("should fail when fn never returns nil within window", func(t *testing.T) {
 		// arrange
 		var (
-			mock = newTestingTMock()
-			sut  = &qa.Ctx[struct{}]{}
+			fatalfCalled = false
+			sut          = &qa.Ctx[struct{}]{
+				T: t,
+				Fatalf: func(format string, args ...any) {
+					fatalfCalled = true
+				},
+			}
 		)
 
 		// act
-		sut.Eventually(mock, "condition", 50*time.Millisecond, func() error {
+		sut.Eventually("condition", 50*time.Millisecond, func(t *testing.T) error {
 			return errors.New("always failing")
 		})
 
 		// assert
-		if len(mock.FatalfCalls()) == 0 {
+		if !fatalfCalled {
 			t.Error("expected Fatalf to be called when fn never returns nil")
 		}
 	})
 
-	t.Run("should not call Fatalf when fn returns nil on first attempt", func(t *testing.T) {
+	t.Run("should not fail when fn returns nil on first attempt", func(t *testing.T) {
 		// arrange
 		var (
-			mock = newTestingTMock()
-			sut  = &qa.Ctx[struct{}]{}
+			fatalfCalled = false
+			sut          = &qa.Ctx[struct{}]{
+				T: t,
+				Fatalf: func(format string, args ...any) {
+					fatalfCalled = true
+				},
+			}
 		)
 
 		// act
-		sut.Eventually(mock, "condition", time.Second, func() error {
+		sut.Eventually("condition", time.Second, func(t *testing.T) error {
 			return nil
 		})
 
 		// assert
-		if len(mock.FatalfCalls()) != 0 {
+		if fatalfCalled {
 			t.Error("expected Fatalf not to be called when fn returns nil")
 		}
 	})
 
-	t.Run("should not call Fatalf when fn eventually returns nil within window", func(t *testing.T) {
+	t.Run("should not fail when fn eventually returns nil within window", func(t *testing.T) {
 		// arrange
 		var (
-			mock  = newTestingTMock()
-			sut   = &qa.Ctx[struct{}]{}
-			calls = 0
+			fatalfCalled = false
+			calls        = 0
+			sut          = &qa.Ctx[struct{}]{
+				T: t,
+				Fatalf: func(format string, args ...any) {
+					fatalfCalled = true
+				},
+			}
 		)
 
 		// act
-		sut.Eventually(mock, "condition", time.Second, func() error {
+		sut.Eventually("condition", time.Second, func(t *testing.T) error {
 			calls++
 			if calls < 3 {
 				return errors.New("not ready yet")
@@ -70,7 +78,7 @@ func TestCtx_Eventually(t *testing.T) {
 		})
 
 		// assert
-		if len(mock.FatalfCalls()) != 0 {
+		if fatalfCalled {
 			t.Error("expected Fatalf not to be called when fn eventually returns nil")
 		}
 		if calls < 3 {
