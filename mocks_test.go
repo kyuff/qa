@@ -193,3 +193,112 @@ func (mock *StubMock) StopCalls() []struct {
 	mock.lockStop.RUnlock()
 	return calls
 }
+
+// Ensure, that TestingTMock does implement qa.TestingT.
+// If this is not the case, regenerate this file with moq.
+var _ qa.TestingT = &TestingTMock{}
+
+// TestingTMock is a mock implementation of qa.TestingT.
+//
+//	func TestSomethingThatUsesTestingT(t *testing.T) {
+//
+//		// make and configure a mocked qa.TestingT
+//		mockedTestingT := &TestingTMock{
+//			FatalfFunc: func(format string, args ...any)  {
+//				panic("mock out the Fatalf method")
+//			},
+//			HelperFunc: func()  {
+//				panic("mock out the Helper method")
+//			},
+//		}
+//
+//		// use mockedTestingT in code that requires qa.TestingT
+//		// and then make assertions.
+//
+//	}
+type TestingTMock struct {
+	// FatalfFunc mocks the Fatalf method.
+	FatalfFunc func(format string, args ...any)
+
+	// HelperFunc mocks the Helper method.
+	HelperFunc func()
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Fatalf holds details about calls to the Fatalf method.
+		Fatalf []struct {
+			// Format is the format argument value.
+			Format string
+			// Args is the args argument value.
+			Args []any
+		}
+		// Helper holds details about calls to the Helper method.
+		Helper []struct {
+		}
+	}
+	lockFatalf sync.RWMutex
+	lockHelper sync.RWMutex
+}
+
+// Fatalf calls FatalfFunc.
+func (mock *TestingTMock) Fatalf(format string, args ...any) {
+	if mock.FatalfFunc == nil {
+		panic("TestingTMock.FatalfFunc: method is nil but TestingT.Fatalf was just called")
+	}
+	callInfo := struct {
+		Format string
+		Args   []any
+	}{
+		Format: format,
+		Args:   args,
+	}
+	mock.lockFatalf.Lock()
+	mock.calls.Fatalf = append(mock.calls.Fatalf, callInfo)
+	mock.lockFatalf.Unlock()
+	mock.FatalfFunc(format, args...)
+}
+
+// FatalfCalls gets all the calls that were made to Fatalf.
+// Check the length with:
+//
+//	len(mockedTestingT.FatalfCalls())
+func (mock *TestingTMock) FatalfCalls() []struct {
+	Format string
+	Args   []any
+} {
+	var calls []struct {
+		Format string
+		Args   []any
+	}
+	mock.lockFatalf.RLock()
+	calls = mock.calls.Fatalf
+	mock.lockFatalf.RUnlock()
+	return calls
+}
+
+// Helper calls HelperFunc.
+func (mock *TestingTMock) Helper() {
+	if mock.HelperFunc == nil {
+		panic("TestingTMock.HelperFunc: method is nil but TestingT.Helper was just called")
+	}
+	callInfo := struct {
+	}{}
+	mock.lockHelper.Lock()
+	mock.calls.Helper = append(mock.calls.Helper, callInfo)
+	mock.lockHelper.Unlock()
+	mock.HelperFunc()
+}
+
+// HelperCalls gets all the calls that were made to Helper.
+// Check the length with:
+//
+//	len(mockedTestingT.HelperCalls())
+func (mock *TestingTMock) HelperCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockHelper.RLock()
+	calls = mock.calls.Helper
+	mock.lockHelper.RUnlock()
+	return calls
+}
