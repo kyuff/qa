@@ -5,15 +5,19 @@ import (
 	"time"
 )
 
-type TestingT interface {
-	Helper()
-	Fatalf(format string, args ...any)
-}
-
 type Ctx[D any] struct {
 	T      *testing.T
 	Data   D
+	Fatalf func(format string, args ...any)
 	prefix string
+}
+
+func (c *Ctx[D]) fail(format string, args ...any) {
+	if c.Fatalf != nil {
+		c.Fatalf(format, args...)
+		return
+	}
+	c.T.Fatalf(format, args...)
 }
 
 func (c *Ctx[D]) Run(name string, fn func(*testing.T)) bool {
@@ -22,17 +26,17 @@ func (c *Ctx[D]) Run(name string, fn func(*testing.T)) bool {
 
 // Eventually calls fn repeatedly until it returns nil or the window expires.
 // If fn never returns nil, the step is failed with the last returned error.
-func (c *Ctx[D]) Eventually(t TestingT, name string, window time.Duration, fn func() error) {
-	t.Helper()
+func (c *Ctx[D]) Eventually(name string, window time.Duration, fn func(t *testing.T) error) {
+	c.T.Helper()
 	deadline := time.Now().Add(window)
 	interval := window / 5
 	for {
-		err := fn()
+		err := fn(c.T)
 		if err == nil {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%s %s: condition not met within %s: %v", c.prefix, name, window, err)
+			c.fail("%s %s: condition not met within %s: %v", c.prefix, name, window, err)
 			return
 		}
 		time.Sleep(interval)
