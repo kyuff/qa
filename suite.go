@@ -1,6 +1,8 @@
 package qa
 
-import "testing"
+import (
+	"testing"
+)
 
 type Suite[G, W, T, D any] func(t *testing.T) (G, W, T)
 
@@ -11,11 +13,21 @@ func NewSuite[G, W, T, D any](
 	when func(*Ctx[D]) W,
 	then func(*Ctx[D]) T,
 	data func(*testing.T) D,
+	opts ...Option,
 ) Suite[G, W, T, D] {
 	return func(t *testing.T) (G, W, T) {
-		d := data(t)
-		return given(&Ctx[D]{T: t, Data: d, prefix: "Given"}),
-			when(&Ctx[D]{T: t, Data: d, prefix: "When"}),
-			then(&Ctx[D]{T: t, Data: d, prefix: "Then"})
+		var (
+			d   = data(t)
+			cfg = applyOptions(defaultConfig(), opts...)
+		)
+		return given(
+				&Ctx[D]{T: t, Data: d, prefix: "Given", cfg: cfg},
+			),
+			when(
+				&Ctx[D]{T: t, Data: d, prefix: "When", cfg: cfg},
+			),
+			then(
+				&Ctx[D]{T: t, Data: d, prefix: "Then", cfg: cfg},
+			)
 	}
 }

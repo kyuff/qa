@@ -10,6 +10,7 @@ type Ctx[D any] struct {
 	Data   D
 	Fatalf func(format string, args ...any)
 	prefix string
+	cfg    *config
 }
 
 func (c *Ctx[D]) fail(format string, args ...any) {
@@ -20,13 +21,13 @@ func (c *Ctx[D]) fail(format string, args ...any) {
 	c.T.Fatalf(format, args...)
 }
 
-func (c *Ctx[D]) Run(name string, fn func(*testing.T)) bool {
+func (c *Ctx[D]) Run(name string, fn func(*testing.T), opts ...Option) bool {
 	return c.T.Run(c.prefix+" "+name, fn)
 }
 
 // Eventually calls fn repeatedly until it returns nil or the window expires.
 // If fn never returns nil, the step is failed with the last returned error.
-func (c *Ctx[D]) Eventually(name string, window time.Duration, fn func(t *testing.T) error) {
+func (c *Ctx[D]) Eventually(name string, window time.Duration, fn func(t *testing.T) error, opts ...Option) {
 	c.T.Helper()
 	deadline := time.Now().Add(window)
 	interval := window / 5

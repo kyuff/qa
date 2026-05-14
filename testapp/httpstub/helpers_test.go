@@ -54,7 +54,7 @@ func mountHandler(t *testing.T, name string, h http.Handler) string {
 		t.Fatalf("mountHandler: %v", err)
 	}
 	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln) //nolint:errcheck
+	go srv.Serve(ln)                                         //nolint:errcheck
 	t.Cleanup(func() { srv.Shutdown(context.Background()) }) //nolint:errcheck
 
 	return "http://" + ln.Addr().String() + prefix
