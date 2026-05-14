@@ -1,4 +1,4 @@
-package qa_test
+package testapp_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kyuff/qa"
+	"github.com/kyuff/qa/testapp"
 )
 
 type testingMMock struct{ code int }
@@ -34,7 +34,7 @@ func startFakeControlServer(t *testing.T) string {
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})}
-	go srv.Serve(ln) //nolint:errcheck
+	go srv.Serve(ln)                                         //nolint:errcheck
 	t.Cleanup(func() { srv.Shutdown(context.Background()) }) //nolint:errcheck
 	return ln.Addr().String()
 }
@@ -58,7 +58,7 @@ func TestRun(t *testing.T) {
 			)
 
 			// act
-			go func() { result <- qa.Run(m, qa.WithStub("svc", noopStub())) }()
+			go func() { result <- testapp.Run(m, testapp.WithStub("svc", noopStub())) }()
 
 			// assert
 			select {
@@ -76,7 +76,7 @@ func TestRun(t *testing.T) {
 			)
 
 			// act
-			go func() { result <- qa.Run(m, qa.WithAppCmd("sleep", "60")) }()
+			go func() { result <- testapp.Run(m, testapp.WithAppCmd("sleep", "60")) }()
 
 			// assert
 			select {
@@ -97,7 +97,7 @@ func TestRun(t *testing.T) {
 
 			// act
 			go func() {
-				result <- qa.Run(m, qa.WithAppCmd(
+				result <- testapp.Run(m, testapp.WithAppCmd(
 					"bash", "-c", "trap '' INT; while true; do sleep 0.1; done",
 				))
 			}()
@@ -118,7 +118,7 @@ func TestRun(t *testing.T) {
 			)
 
 			// act
-			qa.Run(m, qa.WithStub("svc", stub))
+			testapp.Run(m, testapp.WithStub("svc", stub))
 
 			// assert
 			if len(stub.StartCalls()) != 1 {
@@ -134,7 +134,7 @@ func TestRun(t *testing.T) {
 			)
 
 			// act
-			qa.Run(m, qa.WithStub("svc", stub))
+			testapp.Run(m, testapp.WithStub("svc", stub))
 
 			// assert
 			if len(stub.ProbeCalls()) == 0 {
@@ -150,7 +150,7 @@ func TestRun(t *testing.T) {
 			)
 
 			// act
-			qa.Run(m, qa.WithStub("svc", stub))
+			testapp.Run(m, testapp.WithStub("svc", stub))
 
 			// assert
 			if len(stub.StopCalls()) != 1 {
@@ -171,7 +171,7 @@ func TestRun(t *testing.T) {
 			)
 
 			// act
-			qa.Run(m, qa.WithStub("svc", stub), qa.WithControlAddr(cs))
+			testapp.Run(m, testapp.WithStub("svc", stub), testapp.WithControlAddr(cs))
 
 			// assert
 			if len(stub.StartCalls()) != 0 {

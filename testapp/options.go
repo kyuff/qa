@@ -1,4 +1,4 @@
-package qa
+package testapp
 
 import "os"
 
@@ -13,6 +13,17 @@ type config struct {
 	appHealthURL string
 	controlAddr  string
 	controlEnv   string
+}
+
+func defaultConfig() *config {
+	return &config{}
+}
+
+func applyOptions(cfg *config, opts ...Option) *config {
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return cfg
 }
 
 // Option configures a Run call.
@@ -61,17 +72,6 @@ func WithControlAddrEnv(envVar string) Option {
 	return func(cfg *config) {
 		cfg.controlEnv = envVar
 	}
-}
-
-func defaultConfig() *config {
-	return &config{}
-}
-
-func applyOptions(cfg *config, opts ...Option) *config {
-	for _, opt := range opts {
-		opt(cfg)
-	}
-	return cfg
 }
 
 func resolveControlAddr(cfg *config) string {

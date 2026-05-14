@@ -1,4 +1,4 @@
-package qa
+package testapp
 
 import "os"
 

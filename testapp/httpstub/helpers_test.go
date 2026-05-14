@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kyuff/qa/httpstub"
+	"github.com/kyuff/qa/testapp/httpstub"
 )
 
 // startedHTTP starts a local HTTP stub on a random port, waits until it is

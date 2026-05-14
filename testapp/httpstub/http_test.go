@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kyuff/qa/httpstub"
+	"github.com/kyuff/qa/testapp/httpstub"
 )
 
 func TestHTTP(t *testing.T) {
