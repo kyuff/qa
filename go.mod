@@ -1,6 +1,6 @@
 module github.com/kyuff/qa
 
-go 1.26
+go 1.26.2
 
 tool github.com/matryer/moq
 
